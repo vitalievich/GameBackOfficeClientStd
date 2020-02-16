@@ -1,0 +1,9 @@
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\bin\Release\netstandard2.0\GBOClientStd.deps.json
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\bin\Release\netstandard2.0\GBOClientStd.dll
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\bin\Release\netstandard2.0\GBOClientStd.pdb
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.csproj.CoreCompileInputs.cache
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.AssemblyInfoInputs.cache
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.AssemblyInfo.cs
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.dll
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.pdb
+E:\WEBMVC\GamesBackOfficeWAPI\GBOClientStd\obj\Release\netstandard2.0\GBOClientStd.csprojAssemblyReference.cache
