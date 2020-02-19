@@ -112,8 +112,7 @@ namespace GBOClientStd
         private DateTime GetServerDate()
         {
             var rs = GetData($"basedate");
-            JsonSerializerSettings jssett = new JsonSerializerSettings() { DateFormatString = "dd.MM.yyyy HH:mm:ss" };
-            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs, jssett).AddHours(DateTimeOffset.Now.Offset.Hours);
+            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
             return res;
         }
         public DateTime SyncServerDate => DateTime.Now.Subtract(DateOffset);
@@ -516,7 +515,6 @@ namespace GBOClientStd
             chatconnect.InvokeAsync("EndOfFreeMatchFrame", compid, framenum);
         public void DelFreeMatchWebSock(string compid) =>
             chatconnect.InvokeAsync("DelFreeMatch", compid);
-
         public void GetMatchResultsDetailCallBack(string matchid, Action<IEnumerable<FrameResult>> action)
         {
             chatconnect.On<IEnumerable<FrameResult>>("GetMatchResultsDetail", r =>
@@ -532,7 +530,6 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
             return rss;
         }
-
         public void GetFreeMatchesCallBack(Action<List<FreeMatch>> action)
         {
             chatconnect.On<List<FreeMatch>>("FreeMatches", r =>
@@ -756,7 +753,6 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<List<ExchangeEntity>>(res);
             return rss;
         }
-
         public void GetOffersCallBack(Action<List<Offer>> action)
         {
             chatconnect.On<List<Offer>>("GetOffers", res =>
