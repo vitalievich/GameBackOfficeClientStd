@@ -30,7 +30,7 @@ namespace GBOClientStd
     {
         public string Name { get; set; }
         public string Id { get; set; }
-        public bool Online { get; set; }
+        //public bool Online { get; set; }
         public string SrConnectID { get; set; }
         public int MessCount { get; set; }
     }
@@ -76,24 +76,9 @@ namespace GBOClientStd
         public string SellerId { get; set; }
         public string SellerName { get; set; }
         public decimal FullCost { get; set; }
-        public string FullCoststr => FullCost.ToString("G").Replace('.', ',');
         public DateTime? CreateDate { get; set; }
-        //public List<Good> Goods { get; set; }
         public bool IsNew { get; set; } = false;
-        public bool Fixed { get; set; } = false;
-        public string CreateDateStr => (CreateDate == null) ? "" : ((DateTime)CreateDate).ToString("dd.MM.yyyy hh:mm");
         public int Editable { get; set; }
-
-        public static Offer NewOffer(string uid, string uname) => new Offer()
-        {
-            IsNew = true,
-            OfferId = Guid.NewGuid().ToString("N").ToUpper(),
-            SellerId = uid,
-            SellerName = uname,
-            OfferNum = "Новый",
-            Editable = 1
-        };
-
     }
 
     public class StringAndDecimal
@@ -111,7 +96,6 @@ namespace GBOClientStd
         public int MaxVol { get; set; }
         public decimal Cost { get; set; }
         public decimal FullCost => Volume * Cost;
-        public DateTime SettingDate { get; set; }
         public ActiveType ActiveType { get; set; }
         public List<ActiveType> ActiveTypes { get; set; }
         public bool IsNew { get; set; }
@@ -177,6 +161,7 @@ namespace GBOClientStd
         public int SubscribedMembers { get; set; } = 0;
         public List<TournRound> Rounds { get; set; }
         public bool IsSeeded { get; set; }
+        public int PlaceFutureCount { get; set; }
         public List<RoundPlace> AllPlaces => (from p in Rounds
                                                    let r = p.RoundPlaces
                                                    from rp in r
@@ -561,9 +546,7 @@ namespace GBOClientStd
     public class FreeMesssage
     {
         public string FromId { get; set; }
-        public string ToId { get; set; }
         public string MethodJsonParams { get; set; }
-        public string GameId { get; set; }
     }
     public enum UserInCompState
     {

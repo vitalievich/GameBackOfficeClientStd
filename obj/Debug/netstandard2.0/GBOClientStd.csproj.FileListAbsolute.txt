@@ -42,3 +42,4 @@ E:\WEBMVC\GBOWAPISR\ClientSTD\GBOClientStd\obj\Debug\netstandard2.0\GBOClientStd
 E:\WEBMVC\GBOWAPISR\ClientSTD\GBOClientStd\obj\Debug\netstandard2.0\GBOClientStd.AssemblyInfo.cs
 E:\WEBMVC\GBOWAPISR\ClientSTD\GBOClientStd\obj\Debug\netstandard2.0\GBOClientStd.dll
 E:\WEBMVC\GBOWAPISR\ClientSTD\GBOClientStd\obj\Debug\netstandard2.0\GBOClientStd.pdb
+E:\WEBMVC\GBOWAPISR\ClientSTD\GBOClientStd\obj\Debug\netstandard2.0\GBOClientStd.csprojAssemblyReference.cache

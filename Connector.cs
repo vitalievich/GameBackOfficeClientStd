@@ -29,7 +29,7 @@ namespace GBOClientStd
         public event PartnerUnSubsFromFreematch_dlg PartnerUnSubsFromFreematch;
         public delegate void PartnerDelFreematch_dlg(string id);
         public event PartnerDelFreematch_dlg PartnerDelFreematch;
-        public delegate void NeighborConnChanged_dlg(string userid, string compid, bool state);
+        public delegate void NeighborConnChanged_dlg(string userid, string compid); // , bool state
         public event NeighborConnChanged_dlg NeighborConnChanged;
         public delegate void ChatCountChanged_dlg(string messageid, int mscount);
         public event ChatCountChanged_dlg ChatCountChanged;
@@ -264,6 +264,7 @@ namespace GBOClientStd
             chatconnect.Reconnected += async s =>
             {
                 await RefreshClient();
+                await chatconnect.InvokeAsync("GameConnect");
                 Reconnected?.Invoke();
             };
             chatconnect.Closed += async e =>
@@ -271,9 +272,7 @@ namespace GBOClientStd
                 if (EnableCloseEvent) ConnectClosed?.Invoke();
                 await Task.CompletedTask;
             };
-
-            chatconnect.On<string, string>("UsrConnect", (uid, cid) => NeighborConnChanged?.Invoke(uid, cid, true));
-            chatconnect.On<string, string>("UsrDisconnect", (uid, cid) => NeighborConnChanged?.Invoke(uid, cid, false));
+            chatconnect.On<string, string>("UserChangeConnect", (uid, cid) => NeighborConnChanged?.Invoke(uid, cid)); 
             chatconnect.On<CompSeededApps>("CompSeeded", (tsa) =>
                 CompSeeded?.Invoke(tsa));
             chatconnect.On<string, string, COMPTYPE>("ParnterChooseComp", (uid, cid, ctype) =>
@@ -405,7 +404,7 @@ namespace GBOClientStd
             return rss;
         }
         public void GetActivesCallBack(DateTime date, Action<List<GamerActive>> action)
-        {            
+        {
             chatconnect.On<List<GamerActive>>("GetActives", la =>
             {
                 chatconnect.Remove("GetActives");
@@ -840,7 +839,6 @@ namespace GBOClientStd
                         return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
                     }
                     result = responce.Content.ReadAsStringAsync().Result;
-                    //result = JsonConvert.DeserializeObject<List<Good>>(res);
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
