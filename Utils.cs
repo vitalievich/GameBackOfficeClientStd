@@ -171,7 +171,6 @@ namespace GBOClientStd
                                                      let a = p.Applicants
                                                      from aa in a
                                                      select aa).ToList();
-
         public TournRound CurrentRound => 
             MyPlace == null ? null : (from p in Rounds 
                                                                     let r = p.RoundPlaces
@@ -207,7 +206,6 @@ namespace GBOClientStd
         public int Score { get; set; }
         public int Rating { get; set; }
         public int Capital { get; set; }
-
         public string PlaceId { get; set; }
         public string InPlaceId { get; set; }
         public string NextPlaceId { get; set; }
@@ -520,28 +518,12 @@ namespace GBOClientStd
     }
     public class ChatMess
     {
-        public int? Dir
-        {
-            get;
-            set;
-        }
-        public string MyMessage { private get; set; }
-        public string HisMessage { private get; set; }
+        public int Dir {  get; set;  }
         public string MessageId { get; set; }
         public string senderid { get; set; }
-        public string recipientid { get; set; }
-        public DateTimeOffset MessageDateTime { private get; set; }
+        public DateTime MessageDateTime { get; set; }
         public bool IsMyMess => (Dir == 0);
-
         public string Message { get; set; }
-        public string MessDate
-        {
-            get
-            {
-                return MessageDateTime.ToString("dd/MM/yy HH:mm");
-            }
-        }
-
     }
     public class FreeMesssage
     {

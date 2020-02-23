@@ -54,7 +54,6 @@ namespace GBOClientStd
         public Action<int> Reconnecting;
         public string ConnectId => user == null ? "" : user.ConnectId;
         public string Id => user == null ? "" : user.Id;
-
         private static string OfficeUrl, DataUrl, LinkToPay;
         private UserLogin user;
         private readonly string _gameID;
@@ -718,9 +717,9 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetInterlocutors");
         }
-        public IEnumerable<Interlocutor> GetInterlocutors()
+        public List<Interlocutor> GetInterlocutors()
         {
-            return JsonConvert.DeserializeObject<IEnumerable<Interlocutor>>(GetData($"GetInterlocutors"));
+            return JsonConvert.DeserializeObject<List<Interlocutor>>(GetData($"GetInterlocutors"));
         }
         public void GetAllChatCountCallBack(Action<int> action)
         {
@@ -908,7 +907,7 @@ namespace GBOClientStd
         {
             using (var client = InitHttpClient())
             {
-                var responce = PostAsJson(client, $"{DataUrl}EndFreeMatch", id);//  .DeleteAsync($"{DataUrl}EndFreeMatch/{compid}").Result; //
+                var responce = PostAsJson(client, $"{DataUrl}EndFreeMatch", id);
             }
         }
         public void SaveGetFrameFreeParamCallBack(FrameParam inframeParam, Action<FrameParam> action)
@@ -1060,6 +1059,13 @@ namespace GBOClientStd
 
         public void SetMessReadedWebSock(string messid) =>
             chatconnect.InvokeAsync("SetMessReaded", messid);
+        public void SetMessReaded(string messid)
+        {
+            using (var client = InitHttpClient())
+            {
+                var responce = PostAsJson(client, $"{DataUrl}SetMessReaded", messid);
+            }
+        }
         public void ChooseCompetitionWebSock(COMPTYPE comptype) =>
             chatconnect.InvokeAsync("EntersToCompType", comptype);
         public void LeaveCompTypeWebSock(COMPTYPE comptype) =>
