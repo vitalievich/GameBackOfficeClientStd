@@ -485,6 +485,15 @@ namespace GBOClientStd
             chatconnect.InvokeAsync("EndOfRound", placeid);
         public void EndOfRoundFrameWebSock(string placeid) =>
             chatconnect.InvokeAsync("EndOfRoundFrame", placeid);
+        //public void GetTournamentsCallBack(Action<IEnumerable<Tournament>> action)
+        //{
+        //    chatconnect.On<List<Tournament>>("Tournaments", r =>
+        //    {
+        //        chatconnect.Remove("Tournaments");
+        //        action?.Invoke(r);
+        //    });
+        //    chatconnect.InvokeAsync("Tournaments");
+        //}
         public void GetTournamentsCallBack(Action<IEnumerable<Tournament>> action)
         {
             chatconnect.On<IEnumerable<Tournament>>("Tournaments", r =>
@@ -912,12 +921,12 @@ namespace GBOClientStd
         }
         public void SaveGetFrameFreeParamCallBack(FrameParam inframeParam, Action<FrameParam> action)
         {
-            chatconnect.On<FrameParam>("GetTournirPlaceNeigborsCount", res =>
+            chatconnect.On<FrameParam>("SaveGetFrameFreeParam", res =>
             {
-                chatconnect.Remove("GetTournirPlaceNeigborsCount");
+                chatconnect.Remove("SaveGetFrameFreeParam");
                 action?.Invoke(res);
             });
-            chatconnect.InvokeAsync("GetTournirPlaceNeigborsCount", inframeParam);
+            chatconnect.InvokeAsync("SaveGetFrameFreeParam", inframeParam);
         }
         public SsfActionResult SaveGetFrameFreeParam(FrameParam inframeParam, out FrameParam outframeParam)
         {

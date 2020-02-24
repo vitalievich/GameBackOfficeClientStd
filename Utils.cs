@@ -233,7 +233,7 @@ namespace GBOClientStd
                 return $"1/{((int)Math.Pow(2, RoundNum - 1)).ToString()} финала";
             }
         }
-        public IEnumerable<RoundParameter> Parameters { get; set; }
+        public IEnumerable<CompParameter> Parameters { get; set; }
         public IEnumerable<CompApplicant> TourApplicants { get; set; }
         public IEnumerable<RoundPlace> RoundPlaces { get; set; }
 
@@ -241,14 +241,15 @@ namespace GBOClientStd
     public class RoundPlace
     {
         public string Id { get; set; }
+        public string FromPlaceId { get; set; }
         private DateTime? LStart;
-        public DateTime? Start { get => LStart.HasValue ? (DateTime?)LStart.Value.ToLocalTime() : null; set => LStart = value; }
+        public DateTime? Start { get =>   LStart.HasValue ? (DateTime?)LStart.Value.ToLocalTime() : null;  set => LStart = value; }
         public int CurrentFrame { get; set; }
         public List<CompApplicant> Applicants { get; set; }
         public bool Finished { get; set; }
+        public DateTime? End { get; set; }
         public int FuturePartners { get; set; }
         public bool PathToUpExists { get; set; }
-        //public bool IsStarted { get; set; }
     }
     public class NextRoundPlace
     {
@@ -348,12 +349,6 @@ namespace GBOClientStd
         public int FrameNum { get; set; }
     }
 
-    public class RoundParameter : CompParameter
-    {
-        public string RoundId { get; set; }
-
-        public int RoundNum { get; set; }
-    }
     public class CompParameter
     {
         public string Id { get; set; }
