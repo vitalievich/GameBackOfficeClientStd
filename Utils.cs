@@ -68,6 +68,8 @@ namespace GBOClientStd
         public string Id { get; set; }
         public int Volume { get; set; }
         public string Comment { get; set; }
+        public string UserId { get; set; }
+        public int IsCurrency { get; set; }
     }
     public class Offer
     {
@@ -81,11 +83,6 @@ namespace GBOClientStd
         public int Editable { get; set; }
     }
 
-    public class StringAndDecimal
-    {
-        public string S { get; set; }
-        public decimal D { get; set; }
-    }
     public class Good
     {
         public string GoodId { get; set; }
@@ -106,7 +103,18 @@ namespace GBOClientStd
         public string TypeName { get; set; }
         public int MaxVol { get; set; }
         public override string ToString() => TypeName;
+    }
+    public class ChampPlaceScore
+    {
+        public string PlaceId { get; set; }
+        public List<GamerPoints> GamerPoints { get; set; }
+        public  List<Order> Rateord {get; set;}
 
+    }
+    public class GamerPoints
+    {
+        public string UserId { get; set; }
+        public int Points { get; set; }
     }
     public class GamerActive 
     {
@@ -145,13 +153,12 @@ namespace GBOClientStd
     }
     public class Tournament
     {
-        private DateTime _start, _endOfSubscribe;
         public string Id { get; set; }
-        public string UserId { get; set; } // ID текущего игрока
+        //public string UserId { get; set; } // ID текущего игрока
         public virtual string Name { get; set; }
         public List<CompApplicant> Subscribed { get; set; }
-        public DateTime EndOfSubscribe { get => _endOfSubscribe.ToLocalTime(); set => _endOfSubscribe=value; }
-        public DateTime Start { get => _start.ToLocalTime(); set => _start = value; }
+        public DateTime EndOfSubscribe { get; set; }  //{ get => _endOfSubscribe.ToLocalTime(); set => _endOfSubscribe=value; }
+        public DateTime Start { get; set; }  //{ get => _start.ToLocalTime(); set => _start = value; }
         public int Ante { get; set; }
         public int Cenz { get; set; }
         public int AuthorGift { get; set; }
@@ -161,41 +168,40 @@ namespace GBOClientStd
         public int SubscribedMembers { get; set; } = 0;
         public List<TournRound> Rounds { get; set; }
         public bool IsSeeded { get; set; }
-        public int PlaceFutureCount { get; set; }
-        public List<RoundPlace> AllPlaces => (from p in Rounds
-                                                   let r = p.RoundPlaces
-                                                   from rp in r
-                                                   where !rp.Finished 
-                                                   select rp).ToList();
-        public List<CompApplicant> AllApplicants => (from p in AllPlaces
-                                                     let a = p.Applicants
-                                                     from aa in a
-                                                     select aa).ToList();
-        public TournRound CurrentRound => 
-            MyPlace == null ? null : (from p in Rounds 
-                                                                    let r = p.RoundPlaces
-                                                                    from rp in r
-                                                                    let a = rp.Applicants
-                                                                    from aa in a
-                                                                    where rp.Id == MyPlace.Id && !rp.Finished && aa.Id == UserId
-                                                                    select p).SingleOrDefault();
-        public RoundPlace MyPlace =>
-            (from ap in AllPlaces let p = ap.Applicants from m in p where m.Id  == UserId && !ap.Finished select ap).SingleOrDefault(); //  && !ap.IsStarted
-        public bool Loosed(string userconnectid)
-        { 
-            var subs = Subscribed.Any((a) => a.ConnectId == userconnectid);
-            var apl = (from p in Rounds
-                       let r = p.RoundPlaces
-                       from rp in r
-                       let a = rp.Applicants
-                       from aa in a
-                       where aa.Id == UserId
-                       select rp);
-            var dfd = apl.Where((z) => !z.Finished).FirstOrDefault();
-            var ftf = apl.FirstOrDefault();
-            var res = !subs && dfd == null && ftf != null; 
-            return res; 
-        }      
+        //public List<RoundPlace> AllPlaces => (from p in Rounds
+        //                                           let r = p.RoundPlaces
+        //                                           from rp in r
+        //                                           where !rp.Finished 
+        //                                           select rp).ToList();
+        //public List<CompApplicant> AllApplicants => (from p in AllPlaces
+        //                                             let a = p.Applicants
+        //                                             from aa in a
+        //                                             select aa).ToList();
+        //public TournRound CurrentRound => 
+        //    MyPlace == null ? null : (from p in Rounds 
+        //                                                            let r = p.RoundPlaces
+        //                                                            from rp in r
+        //                                                            let a = rp.Applicants
+        //                                                            from aa in a
+        //                                                            where rp.Id == MyPlace.Id && !rp.Finished && aa.Id == UserId
+        //                                                            select p).SingleOrDefault();
+        //public RoundPlace MyPlace =>
+        //    (from ap in AllPlaces let p = ap.Applicants from m in p where m.Id  == UserId && !ap.Finished select ap).SingleOrDefault(); //  && !ap.IsStarted
+        //public bool Loosed(string userconnectid)
+        //{ 
+        //    var subs = Subscribed.Any((a) => a.ConnectId == userconnectid);
+        //    var apl = (from p in Rounds
+        //               let r = p.RoundPlaces
+        //               from rp in r
+        //               let a = rp.Applicants
+        //               from aa in a
+        //               where aa.Id == UserId
+        //               select rp);
+        //    var dfd = apl.Where((z) => !z.Finished).FirstOrDefault();
+        //    var ftf = apl.FirstOrDefault();
+        //    var res = !subs && dfd == null && ftf != null; 
+        //    return res; 
+        //}      
     }
 
     public class CompApplicant
@@ -214,6 +220,19 @@ namespace GBOClientStd
         public bool Started { get; set; }
         public string CustomParams { get; set; }
         public string CompId { get; set; }
+        public bool FrameEnded { get; set; }
+    }
+    public  class CompApplicantComparer : IEqualityComparer<CompApplicant>
+    {
+        public bool Equals(CompApplicant x, CompApplicant y)
+        {
+            return x.Id == y.Id;
+        }
+
+        public int GetHashCode(CompApplicant obj)
+        {
+            return obj.Id.GetHashCode();
+        }
     }
     public class CompSeededApps
     {
@@ -234,29 +253,54 @@ namespace GBOClientStd
             }
         }
         public IEnumerable<CompParameter> Parameters { get; set; }
-        public IEnumerable<CompApplicant> TourApplicants { get; set; }
+        //public IEnumerable<CompApplicant> TourApplicants { get; set; }
         public IEnumerable<RoundPlace> RoundPlaces { get; set; }
 
     }
-    public class RoundPlace
+
+    public class Champ
     {
+        public string Id { get; set; } // из базы
+        public string UserId { get; set; }
+        public string Name { get; set; }  // из базы
+        public DateTime End { get; set; }
+        public DateTime Start { get; set; } // из базы
+        public int Ante { get; set; } // из базы
+        public int Cenz { get; set; } // из базы
+        public int AuthorGift { get; set; }  // из базы
+        public int NumberOfMembers { get; set; }
+        public List<CompPlace> Places { get; set; }  // из базы
+        public bool IsUserInComp { get; set; }   
+        public List<CompParameter> Parameters { get; set; }
+    }
+
+    public class CompPlace
+    {
+        private DateTime? _started, _ended;
         public string Id { get; set; }
+        public List<CompApplicant> Applicants { get;  set; }
+        public DateTime? Start { get => _started.HasValue ? (DateTime?)_started.Value.ToLocalTime() : null; set => _started = value; }
+        public DateTime? End { get => _ended.HasValue ? (DateTime?)_ended.Value.ToLocalTime() : null; set => _ended = value; }
+        public int FrameNum { get; set; }
+    }
+    //public class ChampPlace : CompPlace
+    //{
+    //    //public int LPlace { get; set; }
+    //    //public int RPlace { get; set; }
+    //}
+    public class RoundPlace : CompPlace
+    {
         public string FromPlaceId { get; set; }
-        private DateTime? LStart;
-        public DateTime? Start { get =>   LStart.HasValue ? (DateTime?)LStart.Value.ToLocalTime() : null;  set => LStart = value; }
-        public int CurrentFrame { get; set; }
-        public List<CompApplicant> Applicants { get; set; }
         public bool Finished { get; set; }
-        public DateTime? End { get; set; }
-        public int FuturePartners { get; set; }
         public bool PathToUpExists { get; set; }
     }
-    public class NextRoundPlace
+    public class NextRoundPlace //: RoundPlace
     {
-        public int RoundNum { get; set; }
         public string FromPlaceId { get; set; }
+        public int RoundNum { get; set; }
         public string ToPlaceID { get; set; }
-        public string GamerConnectId { get; set; }
+        public string GamerId { get; set; }
+        public int FuturePartners { get; set; }
         public string RoundName
         {
             get
@@ -267,46 +311,7 @@ namespace GBOClientStd
                 return $"1/{((int)Math.Pow(2, RoundNum - 1)).ToString()} финала";
             }
         }
-        public int FuturePartners { get; set; }
         public bool PathToUpExists { get; set; }
-    }
-
-    public class Champ
-    {
-        private DateTime _start, _endOfSubscribe;
-        public string Id { get; set; } // из базы
-        public string UserId { get; set; }
-        public string Name { get; set; }  // из базы
-        public List<CompApplicant> Subscribed { get; set; } // Все подписавшиеся, не посеянные
-        public DateTime EndOfSubscribe { get => _endOfSubscribe.ToLocalTime(); set => _endOfSubscribe = value; }  // из базы
-        public DateTime Start { get => _start.ToLocalTime(); set => _start = value; } // из базы
-        public int Ante { get; set; } // из базы
-        public int Cenz { get; set; } // из базы
-        public int AuthorGift { get; set; }  // из базы
-        public int RoundsNum => (int)Math.Pow(NumberOfMembers, 2) - NumberOfMembers;
-        public int NumberOfMembers { get; set; }
-        public List<ChampPlace> Places { get; set; }  // из базы
-        public int Seeded { get; set; } // турнир посеян
-        public bool IsUserInComp { get; set; }
-        public bool IsSeeded => Seeded == 1;
-        public bool Finished(string userconnectid) => Seeded == 1 && (from p in Places
-                                                      let a = p.Applicants
-                                                      from aa in a
-                                                      where aa.ConnectId == userconnectid
-                                                                      select p).All(z => z.Ended.HasValue);
-        public List<CompParameter> Parameters { get; set; }
-    }
-    public class ChampPlace
-    {
-        private DateTime? _started, _ended;
-        public int LPlace { get; set; }
-        public int RPlace { get; set; }
-        public string PLaceId { get; set; }
-        public DateTime? Started { get => _started.HasValue? (DateTime?)_started.Value.ToLocalTime():null; set => _started = value ; }
-        public DateTime? Ended { get => _ended.HasValue? (DateTime?)_ended.Value.ToLocalTime() : null; set => _ended = value; }
-        public List<CompApplicant> Applicants { get; set; }
-        public int FrameNum { get; set; }
-
     }
 
     public class Anterior
@@ -315,14 +320,14 @@ namespace GBOClientStd
         public string Id { get; set; } // из базы
         public string Name { get; set; }  // из базы
         public List<AnterApplicant> Applicants { get; set; } // Все Сыгравшие
-        public DateTime End { get => _end.ToLocalTime(); set => _end = value; }  // из базы
+        public DateTime End { get => _end.ToLocalTime(); set => _end = value; } 
         public DateTime Start { get => _start.ToLocalTime(); set => _start = value; } // из базы
         public int Ante { get; set; } // из базы
         public int Cenz { get; set; } // из базы
         public int AuthorGift { get; set; }  // из базы
         public int NumberOfMembers { get; set; }
         public List<CompParameter> Parameters { get; set; }
-        public string PlaceId { get; set; }
+        //public string PlaceId { get; set; }
     }
     public class AnterApplicant
     {
@@ -331,16 +336,10 @@ namespace GBOClientStd
         public int Rating { get; set; }
         public int Capital { get; set; }
         public string PlaceId { get; set; }
-        public string CompResult { get; set; }
-    }
-    public class Frame
-    {
-        public string CompId { get; set; }
-        public string PlaceId { get; set; }
-        public string UserConnectId { get; set; }
+        public List<string> CompResult { get; set; }
         public int FrameNum { get; set; }
-        public int Score { get; set; }
     }
+
     public class FrameParam
     {
         public string Id { get; set; }
@@ -349,12 +348,6 @@ namespace GBOClientStd
         public int FrameNum { get; set; }
     }
 
-    public class CompParameter
-    {
-        public string Id { get; set; }
-        public string ParamName { get; set; }
-        public int Value { get; set; }
-    }
 
     public class RoundStart
     {
@@ -381,15 +374,14 @@ namespace GBOClientStd
         public string CompId { get; set; }
         public string UserId { get; set; }
         public int PlaceNum { get; set; }
-        public int Prize { get; set; }
+        public int Prize { get; set; } 
         public int Rate { get; set; }
         public decimal PrefVolume { get; set; }
     }
-
     public class AnterResult : ChampPref
-    {        public decimal Score { get; set; }
+    {
+        public decimal Score { get; set; }
     }
-
     public class ChampGamerResult
     {
         public string GamerID { get; set; }
@@ -418,7 +410,6 @@ namespace GBOClientStd
         public decimal Result { set; get; }
         public decimal Active { set; get; }
         public string Comment { get; set; }
-
     }
 
     public class FreeMatch
@@ -428,14 +419,14 @@ namespace GBOClientStd
         public string CreatorID { get; set; }
         public string CompId { get; set; } = "";
         public List<CompApplicant> Participants { get; set; }
-        public List<GameParameter> Parameters { get; set; }
+        public List<CompParameter> Parameters { get; set; }
         public string JsonParam { get; set; }
         public int Partners { get; set; } = 2;
         public int Frames { get; set; } = 1;
-        public Dictionary<string, GameParameter> ParamsDict => Parameters.ToDictionary(p => p.Id);
+        public Dictionary<string, CompParameter> ParamsDict => Parameters.ToDictionary(p => p.Id);
         public int FrameNum { get; set; }
         public DateTime? DateStarted { get => _dateStarted.HasValue? (DateTime ? )_dateStarted.Value.ToLocalTime():null; set => _dateStarted = value; }
-        public List<GameParameter> NewParams { get; set; }
+        public List<CompParameter> NewParams { get; set; }
     }
     public class NewFreeMatch
     {
@@ -452,13 +443,20 @@ namespace GBOClientStd
         public int Value { get; set; }
     }
 
-    public class GameParameter
+    public class CompParameter
     {
         public string Id { get; set; }
-        public string CompId { get; set; }
         public string ParamName { get; set; }
-        public int DefValue { get; set; }
+        //public string CompId { get; set; }
+        public int Value { get; set; }
     }
+    //public class CompParameter
+    //{
+    //    public string Id { get; set; }
+    //    public string CompId { get; set; }
+    //    public string ParamName { get; set; }
+    //    public int DefValue { get; set; }
+    //}
 
     public enum ERROR
     {
@@ -525,13 +523,13 @@ namespace GBOClientStd
         public string FromId { get; set; }
         public string MethodJsonParams { get; set; }
     }
-    public enum UserInCompState
-    {
-        UNDEFINED = -1,
-        CHOOSING,
-        INCOMP,
-        FINISHED
-    }
+    //public enum UserInCompState
+    //{
+    //    UNDEFINED = -1,
+    //    CHOOSING,
+    //    INCOMP,
+    //    FINISHED
+    //}
     public enum COMPTYPE
     {
         CHAMP = 0,
