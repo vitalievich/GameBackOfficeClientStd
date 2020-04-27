@@ -16,23 +16,24 @@ using System.Linq;
 
 namespace GBOClientStd
 {
+    public delegate void PartnerAddFreematch_dlg(FreeMatch fm);
+    public delegate void PartnerSubsToFreematch_dlg(CompApplicant mpart);
+    public delegate void PartnerUnSubsFromFreematch_dlg(string cid, string compid);
+    public delegate void PartnerDelFreematch_dlg(string id);
+    public delegate void NeighborConnChanged_dlg(string userid, string compid); // , bool state
+    public delegate void ChatCountChanged_dlg(string messageid, int mscount);
 
-
-    public class Connector 
+    public class Connector
     {
 
-        public delegate void PartnerAddFreematch_dlg(FreeMatch fm);
         public event PartnerAddFreematch_dlg PartnerAddFreematch;
-        public delegate void PartnerSubsToFreematch_dlg(CompApplicant mpart);
         public event PartnerSubsToFreematch_dlg PartnerSubsFreeMatch;
-        public delegate void PartnerUnSubsFromFreematch_dlg(string cid, string compid);
         public event PartnerUnSubsFromFreematch_dlg PartnerUnSubsFromFreematch;
-        public delegate void PartnerDelFreematch_dlg(string id);
         public event PartnerDelFreematch_dlg PartnerDelFreematch;
-        public delegate void NeighborConnChanged_dlg(string userid, string compid); // , bool state
         public event NeighborConnChanged_dlg NeighborConnChanged;
-        public delegate void ChatCountChanged_dlg(string messageid, int mscount);
         public event ChatCountChanged_dlg ChatCountChanged;
+
+
 
         public Action<List<Order>> GameActVolChanged;
         public Action<string, string, COMPTYPE, bool> PartnerChooseComp;
@@ -52,10 +53,12 @@ namespace GBOClientStd
         public Action<ChatMess> NewMessage;
         public Action ConnectClosed, Reconnected;
         public Action<int> Reconnecting;
+        public Action<string> OfferBuyed;
+
         public string ConnectId => user == null ? "" : user.ConnectId;
         public string Id => user == null ? "" : user.Id;
         private static string OfficeUrl, DataUrl, LinkToPay;
-        private UserLogin user;
+        public UserLogin user;
         private readonly string _gameID;
         private static Connector connector = null;
         private Timer refreshTimer, datesynctimer;
@@ -66,6 +69,7 @@ namespace GBOClientStd
         private TimeSpan DateOffset = new TimeSpan(0);
         private static TimeSpan[] Delays = new TimeSpan[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(35) };
         public bool EnableCloseEvent = true;
+        private readonly HttpClient httpClient;
 
         #region constructors
         private Connector(string gameID, string gboUrl)
@@ -77,11 +81,26 @@ namespace GBOClientStd
             refreshTimer = new Timer(Refresh, null, -1, -1);
             datesynctimer = new Timer(SyncData, null, -1, -1);
             OpenedMethods = new Dictionary<string, Action<FreeMesssage>>();
-        }
+            httpClient = new HttpClient();
+            chatconnect = new HubConnectionBuilder()
+            .WithUrl($"{OfficeUrl}/SR", HttpTransportType.WebSockets, options =>
+            {
+                options.AccessTokenProvider = async () =>
+                {
+                    return await Task.FromResult(user.WsAccessToken);
+                };
+                options.CloseTimeout = TimeSpan.FromSeconds(30);
 
+            })
+            .WithAutomaticReconnect(new RetryPolicy(Reconnect, Delays))
+            .Build();
+        }
         public static Connector Instance(string gameID, string gboUrl)
         {
-            if (connector == null) connector = new Connector(gameID, gboUrl);
+            if (connector == null)
+            {
+                connector = new Connector(gameID, gboUrl);
+            }
             return connector;
         }
         public static Connector Instance(string gameID, string gboUrl, TimeSpan[] delays)
@@ -114,6 +133,12 @@ namespace GBOClientStd
             DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
             return res;
         }
+        private async Task<DateTime> GetServerDateAsync()
+        {
+            var rs = await GetDataAsync($"basedate");
+            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
+            return res;
+        }
         public DateTime SyncServerDate => DateTime.Now.Subtract(DateOffset);
         public void AddORChangeAction(string key, Action<FreeMesssage> action)
         {
@@ -139,18 +164,16 @@ namespace GBOClientStd
 
             string cnt;
             SsfActionResult actionResult;
-            using (var client = new HttpClient())
+            var client = new HttpClient();
+            using (var response = PostAsJson(client, $"{OfficeUrl}/register", usrReg))
             {
-                using (var response = PostAsJson(client, $"{OfficeUrl}/register", usrReg))
+                if (response.StatusCode == HttpStatusCode.NotFound) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                cnt = response.Content.ReadAsStringAsync().Result;
+                if (!response.IsSuccessStatusCode)
                 {
-                    if (response.StatusCode == HttpStatusCode.NotFound) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    cnt = response.Content.ReadAsStringAsync().Result;
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = cnt };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = cnt };
                 }
-            }
+            }           
             actionResult = GetInnerError(cnt);
             return actionResult;
         }
@@ -167,24 +190,19 @@ namespace GBOClientStd
         /// <returns></returns>
         public SsfActionResult Login(string username, string userpassword)
         {
-
             user = new UserLogin() { Name = username, Password = userpassword, Gameid = _gameID, Grant_type = "password", TimeOffset = DateTimeOffset.Now.Offset.Hours };
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(userpassword))
             {
                 return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.WRONGARGUMENTS] };
             }
             string result = "";
-            HttpResponseMessage response = null;
-            using (var client = new HttpClient())
+            using (HttpResponseMessage response = PostAsJson(httpClient, $"{OfficeUrl}/Token", user))
             {
-                using (response = PostAsJson(client, $"{OfficeUrl}/Token", user))
+                if (response.StatusCode != HttpStatusCode.OK)
                 {
-                    if (response.StatusCode != HttpStatusCode.OK)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    result = response.Content.ReadAsStringAsync().Result;
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
+                result = response.Content.ReadAsStringAsync().Result;
             }
 
             Dictionary<string, string> tokenDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
@@ -202,6 +220,9 @@ namespace GBOClientStd
                 datesynctimer.Change(0, 3600000);
             }
 
+            //System.Diagnostics.Debug.WriteLine("Login user.AccessToken");
+            //System.Diagnostics.Debug.WriteLine($"Login {user.AccessToken}");
+
             return new SsfActionResult() { Error = err, Message = ErrorMess.Messages[err] };
         }
         /// <summary>
@@ -214,14 +235,11 @@ namespace GBOClientStd
         public async Task<SsfActionResult> RefreshClient()
         {
             string result;
-            using (var client = new HttpClient())
+            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", user.RefreshToken);
+            using (var response = PostAsJson(httpClient, $"{OfficeUrl}/RefreshToken", null))
             {
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", user.RefreshToken);
-                using (var response = PostAsJson(client, $"{OfficeUrl}/RefreshToken", null))
-                {
-                    if (response.StatusCode != HttpStatusCode.OK) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    result = response.Content.ReadAsStringAsync().Result;
-                }
+                if (response.StatusCode != HttpStatusCode.OK) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                result = response.Content.ReadAsStringAsync().Result;
             }
             Dictionary<string, string> tokenDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
             ERROR err = (ERROR)int.Parse(tokenDictionary["Error"]);
@@ -233,6 +251,11 @@ namespace GBOClientStd
                 user.RefreshToken = tokenDictionary["refresh_token"];
                 refreshTimer.Change(RefreshTimeOutMsec - 5000, RefreshTimeOutMsec);
             }
+
+
+            //System.Diagnostics.Debug.WriteLine("RefreshClient user.AccessToken");
+            //System.Diagnostics.Debug.WriteLine($"RefreshClient {user.AccessToken}");
+
             await Task.CompletedTask;
             return new SsfActionResult() { Error = err, Message = ErrorMess.Messages[err] };
         }
@@ -240,26 +263,18 @@ namespace GBOClientStd
         {
             var res = RefreshClient().Result;
         }
+
         private void Reconnect(int n)
         {
             Reconnecting?.Invoke(n);
         }
+
         /// <summary>
         /// Инициация SignalR 
         /// </summary>
+        /// 
         private void InitChatConnect()
         {
-            chatconnect = new HubConnectionBuilder()
-                .WithUrl($"{OfficeUrl}/SR", HttpTransportType.WebSockets, options =>
-                {
-                    options.AccessTokenProvider = async () =>
-                    {
-                        return await Task.FromResult(user.WsAccessToken);
-                    };
-
-                })
-                .WithAutomaticReconnect(new RetryPolicy(Reconnect, Delays))
-                .Build();
             chatconnect.Reconnected += async s =>
             {
                 await RefreshClient();
@@ -302,7 +317,10 @@ namespace GBOClientStd
                 NewMessage?.Invoke(s));
             chatconnect.On<List<Order>>("GameActVolChanged", (c) =>
                 GameActVolChanged?.Invoke(c));
-            chatconnect.On<string, FreeMesssage>("FreeMethod", (k, s) => {
+            chatconnect.On<string>("OfferBuyed", (id) => 
+                OfferBuyed?.Invoke(id));
+            chatconnect.On<string, FreeMesssage>("FreeMethod", (k, s) =>
+            {
                 if (OpenedMethods.ContainsKey(k)) OpenedMethods[k]?.Invoke(s);
             });
             chatconnect.On<Offer>("OffersChanged", (s) =>
@@ -347,17 +365,28 @@ namespace GBOClientStd
         private string GetData(string method)
         {
             string getrequest = $"{DataUrl}{method}";
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            var response = client.GetAsync(getrequest).Result;
+            if (!response.IsSuccessStatusCode)
             {
-                var response = client.GetAsync(getrequest).Result;
-                if (!response.IsSuccessStatusCode)
-                {
-                    return response.ReasonPhrase;
-                }
-                var cnt = response.Content.ReadAsStringAsync().Result;
-                return cnt;
+                return response.ReasonPhrase;
             }
+            var cnt = response.Content.ReadAsStringAsync().Result;
+            return cnt;
         }
+        private async Task<string> GetDataAsync(string method)
+        {
+            string getrequest = $"{DataUrl}{method}";
+            var client = InitHttpClient();
+            var response = client.GetAsync(getrequest).Result;
+            if (!response.IsSuccessStatusCode)
+            {
+                return response.ReasonPhrase;
+            }
+            var cnt = await response.Content.ReadAsStringAsync();
+            return cnt;
+        }
+
         public void GetCurrencyNameCallBack(Action<string> action)
         {
             chatconnect.On<string>("GetCurrencyName", r =>
@@ -371,6 +400,11 @@ namespace GBOClientStd
         {
             return GetData("getcname");
         }
+        public async Task<string> GetCurrencyNameAsync()
+        {
+            return await GetDataAsync("getcname");
+        }
+
         public void GetGameParamsCallBack(Action<IEnumerable<CompParameter>> action)
         {
             chatconnect.On<IEnumerable<CompParameter>>("GetGameParams", r =>
@@ -383,6 +417,11 @@ namespace GBOClientStd
         public IEnumerable<CompParameter> GetGameParams()
         {
             var res = JsonConvert.DeserializeObject<IEnumerable<CompParameter>>(GetData($"GetGameParams"));
+            return res;
+        }
+        public async Task<IEnumerable<CompParameter>> GetGameParamsAsync()
+        {
+            var res = JsonConvert.DeserializeObject<IEnumerable<CompParameter>>(await GetDataAsync($"GetGameParams"));
             return res;
         }
 
@@ -405,6 +444,15 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<UserInGameActiveMoving>>(res);
             return rss;
         }
+        public async Task<IEnumerable<UserInGameActiveMoving>> GetActiveDetailsAsync(string activeid, DateTime start, DateTime end)
+        {
+            string datereqstart = start.ToString("yyyyMMdd");
+            string datereqend = end.ToString("yyyyMMdd");
+            string res = await GetDataAsync($"getactivedetails/{activeid}/{datereqstart}/{datereqend}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<UserInGameActiveMoving>>(res);
+            return rss;
+        }
+
         public void GetActivesCallBack(DateTime date, Action<List<GamerActive>> action)
         {
             chatconnect.On<List<GamerActive>>("GetActives", la =>
@@ -413,6 +461,18 @@ namespace GBOClientStd
                 action?.Invoke(la);
             });
             chatconnect.InvokeAsync("GetActives", date);
+        }
+        public async Task<List<GamerActive>> GetActivesAsync(DateTime date)
+        {
+            var client = InitHttpClient();
+            using (var responce = await PostAsJsonAsync(client, $"{DataUrl}getactives", date))
+            {
+                if (!responce.IsSuccessStatusCode)
+                    return new List<GamerActive>();
+                var res = await responce.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<List<GamerActive>>(res);
+                return result;
+            }
         }
         public SsfActionResult GetActives(DateTime date, out List<GamerActive> result)
         {
@@ -432,6 +492,7 @@ namespace GBOClientStd
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
 
         }
+
         public void GetParamValueCallBack(string id, Action<int> action)
         {
             chatconnect.On<int>("GetParamValue", r =>
@@ -443,8 +504,13 @@ namespace GBOClientStd
         }
         public int GetParamValue(string id)
         {
-
             string res = GetData($"GetParamValue/{id}");
+            var rss = JsonConvert.DeserializeObject<int>(res);
+            return rss;
+        }
+        public async Task<int> GetParamValueAsync(string id)
+        {
+            string res = await GetDataAsync($"GetParamValue/{id}");
             var rss = JsonConvert.DeserializeObject<int>(res);
             return rss;
         }
@@ -461,36 +527,33 @@ namespace GBOClientStd
         }
         public void WriteFrameResultWebSock(FrameResult frameresults) =>
             chatconnect.InvokeAsync("WriteFrameResults", frameresults);
+        public SsfActionResult WriteFrameResult(FrameResult frameresults)
+        {
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteFrameResults", frameresults))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                }
+            }
+            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
+        }
         public void WriteMatchWinnerWebSock(MatchResults matchResults) =>
             chatconnect.InvokeAsync("WriteMatchWinner", matchResults);
         public SsfActionResult WriteMatchWinner(string uid, MatchResults matchResults)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteMatchWinner", new { uid, matchResults }))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteMatchWinner", new { uid, matchResults }))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
-        public SsfActionResult WriteFrameResult(FrameResult frameresults)
-        {
-            using (var client = InitHttpClient())
-            {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteFrameResults", frameresults))
-                {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                }
-            }
-            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
-        }
+
         #endregion
         #region Tournir
         public void StartFrameWebSock(string placeid, string custopmparams) =>
@@ -499,6 +562,7 @@ namespace GBOClientStd
            chatconnect.InvokeAsync("SetTournRoundStart", start);
         public void EndOfRoundWebSock(string placeid, string winnerid) =>
             chatconnect.InvokeAsync("EndOfRound", placeid, winnerid);
+
         public void GetTournamentsCallBack(Action<List<Tournament>> action)
         {
             chatconnect.On<List<Tournament>>("Tournaments", r =>
@@ -513,9 +577,14 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<List<Tournament>>(GetData($"Tournaments"));
             return res;
         }
+        public async Task<List<Tournament>> GetTournamentsAsync()
+        {
+            var res = JsonConvert.DeserializeObject<List<Tournament>>(await GetDataAsync($"Tournaments"));
+            return res;
+        }
+
         #endregion
         #region FreeMatches
-
         public void UnSubscribeFromFreeMatchWebSock(string cid) =>
             chatconnect.InvokeAsync("UnSubscribeFromFreeMatch", cid);
         public void SubscribeToFreeMatchWebSock(string cid) =>
@@ -524,6 +593,7 @@ namespace GBOClientStd
            chatconnect.InvokeAsync("StartFreeMatch", compid);
         public void DelFreeMatchWebSock(string compid) =>
             chatconnect.InvokeAsync("DelFreeMatch", compid);
+
         public void GetMatchResultsDetailCallBack(string matchid, Action<IEnumerable<FrameResult>> action)
         {
             chatconnect.On<IEnumerable<FrameResult>>("GetMatchResultsDetail", r =>
@@ -539,6 +609,13 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
             return rss;
         }
+        public async Task<IEnumerable<FrameResult>> GetMatchResultsDetailAsync(string matchid)
+        {
+            string res = await GetDataAsync($"GetMatchResultsDetail/{matchid}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
+            return rss;
+        }
+
         public void GetFreeMatchesCallBack(Action<List<FreeMatch>> action)
         {
             chatconnect.On<List<FreeMatch>>("FreeMatches", r =>
@@ -553,6 +630,11 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<IEnumerable<FreeMatch>>(GetData($"FreeMatches"));
             return res;
         }
+        public async Task<IEnumerable<FreeMatch>> GetFreeMatchesAsync()
+        {
+            var res = JsonConvert.DeserializeObject<IEnumerable<FreeMatch>>(await GetDataAsync($"FreeMatches"));
+            return res;
+        }
 
         #endregion
         #region Champs
@@ -560,6 +642,7 @@ namespace GBOClientStd
         {
             chatconnect.InvokeAsync("SubscribeToChamp", id);
         }
+
         public void GetChampsCallBack(Action<List<Champ>> action)
         {
             chatconnect.On<List<Champ>>("Champs", r =>
@@ -574,56 +657,47 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<List<Champ>>(GetData($"Champs"));
             return res;
         }
+        public async Task<List<Champ>> GetChampsAsync()
+        {
+            var res = JsonConvert.DeserializeObject<List<Champ>>(await  GetDataAsync($"Champs"));
+            return res;
+        }
+
         public void StartChampPlaceWebSock(string placeid) =>
             chatconnect.InvokeAsync("StartChampPlace", placeid);
-        public void WriteChampPlaceScoreWebSock(ChampPlaceScore champPlaceScore) =>
+
+        public void WriteChampPlaceScoreWebSock(ChampPlaceScore champPlaceScore)
+        {
             chatconnect.InvokeAsync("WriteChampPlaceScore", champPlaceScore);
+        }
         public SsfActionResult WriteChampPlaceScore(ChampPlaceScore champPlaceScore)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteChampPlaceScore", champPlaceScore))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteChampPlaceScore", champPlaceScore))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+
         public void WriteChampFrameScoreWebSock(string userid, string pid) =>
             chatconnect.InvokeAsync("WriteChampFrameScore", userid, pid);
         public SsfActionResult WriteChampFrameScore(string userid, string pid)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteChampFrameScore", new string[] { userid, pid }))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteChampFrameScore", new string[] { userid, pid }))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
-        //public void WriteRatingWebSock(List<Order> rateord) =>
-        //    chatconnect.InvokeAsync("WriteRating", rateord);
-        //public SsfActionResult WriteRating(List<Order> rateord)
-        //{
-        //    using (var client = InitHttpClient())
-        //    {
-        //        using (var responce = PostAsJson(client, $"{DataUrl}WriteRating", rateord))
-        //        {
-        //            if (!responce.IsSuccessStatusCode)
-        //            {
-        //                return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-        //            }
-        //        }
-        //    }
-        //    return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
-        //}
+
         public void GetChampResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> action)
         {
             chatconnect.On<IEnumerable<FrameResult>>("GetChampResultsDetail", r =>
@@ -639,24 +713,33 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
             return rss;
         }
+        public async Task<IEnumerable<FrameResult>> GetChampResultsDetailAsync(string compid)
+        {
+            string res = await GetDataAsync($"GetChampResultsDetail/{compid}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
+            return rss;
+        }
+
         public IEnumerable<ChampMeetingScore> GetChampScore(string compid)
         {
             string res = GetData($"GetChampScore/{compid}");
             var rss = JsonConvert.DeserializeObject<IEnumerable<ChampMeetingScore>>(res);
             return rss;
         }
-        public void WriteChampPrefsWebSock(List<ChampPref> champresults) =>
-            chatconnect.InvokeAsync("WriteChampPrefs", champresults);
+        public async Task<IEnumerable<ChampMeetingScore>> GetChampScoreAsync(string compid)
+        {
+            string res = await GetDataAsync($"GetChampScore/{compid}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<ChampMeetingScore>>(res);
+            return rss;
+        }
         public SsfActionResult WriteChampPrefs(List<ChampPref> champresults)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteChampPrefs", champresults))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteChampPrefs", champresults))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
@@ -679,48 +762,43 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
             return rss;
         }
-        public void StartAnterMatchWebSock(string compid, Action<AnterApplicant> action)
+        public async Task<IEnumerable<FrameResult>> GetAnterResultsDetailAsync(string compid)
         {
-            chatconnect.On<AnterApplicant>("StartAnterMatch", r =>
-            {
-                chatconnect.Remove("StartAnterMatch");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("StartAnterMatch", compid);
+            string res = await GetDataAsync($"GetAnterResultsDetail/{compid}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
+            return rss;
         }
-        public SsfActionResult StartAnterMatch(string compid, out AnterApplicant anterApplicant)
+
+        public async Task<AnterApplicant> StartAnterMatchAsync(string compid)
         {
-            anterApplicant = null;
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}StartAnterMatch", compid))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}StartAnterMatch", compid))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    var respdata = responce.Content.ReadAsStringAsync().Result;
-                    anterApplicant = JsonConvert.DeserializeObject<AnterApplicant>(respdata);
+                    return null;
                 }
+                var respdata = await responce.Content.ReadAsStringAsync();
+                var anterApplicant = JsonConvert.DeserializeObject<AnterApplicant>(respdata);
+                return anterApplicant;
             }
-            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+
         public void WriteAnterPrefsWebSock(List<AnterResult> champresults) =>
             chatconnect.InvokeAsync("WriteAnterPrefs", champresults);
         public SsfActionResult WriteAnterPrefs(List<AnterResult> champresults)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}WriteAnterPrefs", champresults))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}WriteAnterPrefs", champresults))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+
         #endregion
         #region privatemethods
         private HttpResponseMessage PostAsJson(HttpClient client, string url, object obj)
@@ -736,7 +814,22 @@ namespace GBOClientStd
             {
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             }
-        }   
+        }
+        private async Task<HttpResponseMessage> PostAsJsonAsync(HttpClient client, string url, object obj)
+        {
+            try
+            {
+                if (obj == null)
+                    return await client.PostAsync(url, null);
+                var body = JsonConvert.SerializeObject(obj);
+                var ttt = await client.PostAsync(url, new StringContent(body, Encoding.UTF8, "application/json"));
+                return ttt;
+            }
+            catch (AggregateException)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+        }
         private SsfActionResult GetInnerError(string reqresult)
         {
             if (string.IsNullOrWhiteSpace(reqresult)) return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = ErrorMess.Messages[ERROR.COMMONERROR] };
@@ -746,9 +839,9 @@ namespace GBOClientStd
             return actionResult;
         }
         #endregion
+        #region DataOperations    
 
-        #region DataOperations      
-        public void GetChatCallBack(string neghbid,  Action<IEnumerable<ChatMess>> action)
+        public void GetChatCallBack(string neghbid, Action<IEnumerable<ChatMess>> action)
         {
             chatconnect.On<IEnumerable<ChatMess>>("GetChatHist", res =>
             {
@@ -757,12 +850,20 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetChatHist", neghbid);
         }
+        public async Task<IEnumerable<ChatMess>> GetChatAsync(string neghbid)
+        {
+            var cnt = await GetDataAsync($"GetChatHist/{neghbid}");
+            var rss = JsonConvert.DeserializeObject<IEnumerable<ChatMess>>(cnt);
+            return rss;
+
+        }
         public IEnumerable<ChatMess> GetChat(string neghbid)
         {
             string res = GetData($"GetChatHist/{neghbid}");
             var rss = JsonConvert.DeserializeObject<IEnumerable<ChatMess>>(res);
             return rss;
         }
+
         public void GetInterlocutorsCallBack(Action<IEnumerable<Interlocutor>> action)
         {
             chatconnect.On<IEnumerable<Interlocutor>>("GetInterlocutors", res =>
@@ -772,10 +873,15 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetInterlocutors");
         }
+        public async Task<List<Interlocutor>> GetInterlocutorsAsync()
+        {
+            return JsonConvert.DeserializeObject<List<Interlocutor>>(await GetDataAsync($"GetInterlocutors"));
+        }
         public List<Interlocutor> GetInterlocutors()
         {
             return JsonConvert.DeserializeObject<List<Interlocutor>>(GetData($"GetInterlocutors"));
         }
+
         public void GetAllChatCountCallBack(Action<int> action)
         {
             chatconnect.On<int>("GetAllChatCount", res =>
@@ -784,14 +890,20 @@ namespace GBOClientStd
                 action?.Invoke(res);
             });
             chatconnect.InvokeAsync("GetAllChatCount");
-           
+
+        }
+        public async Task<int> GetAllChatCountAsync()
+        {
+            var cnt = await GetDataAsync($"GetAllChatCount");
+            return int.Parse(cnt);
         }
         public int GetAllChatCount()
         {
             var cnt = GetData($"GetAllChatCount");
             return int.Parse(cnt);
         }
-        public  void GetExchangeEntitiesCallBack(Action<List<ExchangeEntity>> action)
+
+        public void GetExchangeEntitiesCallBack(Action<List<ExchangeEntity>> action)
         {
             chatconnect.On<List<ExchangeEntity>>("GetExchangeEntities", res =>
             {
@@ -800,12 +912,19 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetExchangeEntities");
         }
+        public async Task<List<ExchangeEntity>> GetExchangeEntitiesAsync()
+        {
+            string res = await GetDataAsync($"GetExchangeEntities");
+            var rss = JsonConvert.DeserializeObject<List<ExchangeEntity>>(res);
+            return rss;
+        }
         public List<ExchangeEntity> GetExchangeEntities()
         {
             string res = GetData($"GetExchangeEntities");
             var rss = JsonConvert.DeserializeObject<List<ExchangeEntity>>(res);
             return rss;
         }
+
         public void GetOffersCallBack(Action<List<Offer>> action)
         {
             chatconnect.On<List<Offer>>("GetOffers", res =>
@@ -815,11 +934,17 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetOffers");
         }
+        public async Task<List<Offer>> GetOffersAsync()
+        {
+            var res = JsonConvert.DeserializeObject<List<Offer>>(await GetDataAsync($"GetOffers"));
+            return res;
+        }
         public List<Offer> GetOffers()
         {
             var res = JsonConvert.DeserializeObject<List<Offer>>(GetData($"GetOffers"));
             return res;
         }
+
         public void ChangeOfferCallBack(List<Good> ChangeOffer, Action<List<Good>> action)
         {
             chatconnect.On<List<Good>>("ChangeOffer", res =>
@@ -832,20 +957,33 @@ namespace GBOClientStd
         public SsfActionResult ChangeOffer(List<Good> ChangeOffer, out List<Good> result)
         {
             result = new List<Good>();
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}ChangeOffer", ChangeOffer))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}ChangeOffer", ChangeOffer))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    var res = responce.Content.ReadAsStringAsync().Result;
-                    result = JsonConvert.DeserializeObject<List<Good>>(res);
+                    return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
+                var res = responce.Content.ReadAsStringAsync().Result;
+                result = JsonConvert.DeserializeObject<List<Good>>(res);
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+        public async Task<List<Good>> ChangeOfferAsync(List<Good> ChangeOffer)
+        {
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}ChangeOffer", ChangeOffer))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return new List<Good>();
+                }
+                var res = await responce.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<List<Good>>(res);
+                return result;
+            }
+        }
+
         public void FindOffersCallBack(List<string> goodids, Action<List<Offer>> action)
         {
             chatconnect.On<List<Offer>>("FindOffers", res =>
@@ -855,23 +993,35 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("FindOffers");
         }
-        public SsfActionResult FindOffers(List<string> goodids, out List<Offer> result)
+        public async Task<List<Offer>> FindOffersAsync(List<string> goodids)
         {
-            result = new List<Offer>();
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = await PostAsJsonAsync(client, $"{DataUrl}FindOffers", goodids))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}FindOffers", goodids))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    var res = responce.Content.ReadAsStringAsync().Result;
-                    result = JsonConvert.DeserializeObject<List<Offer>>(res);
+                    return null;
                 }
+                var res = await responce.Content.ReadAsStringAsync();
+                var result = JsonConvert.DeserializeObject<List<Offer>>(res);
+                return result;
             }
-            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+        public List<Offer> FindOffers(List<string> goodids)
+        {
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}FindOffers", goodids))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+                var res = (responce.Content.ReadAsStringAsync()).Result;
+                var result = JsonConvert.DeserializeObject<List<Offer>>(res);
+                return result;
+            }
+        }
+
         public void BuyOfferCallBack(string offid, Action<string> action)
         {
             chatconnect.On<string>("BuyOffer", res =>
@@ -884,19 +1034,32 @@ namespace GBOClientStd
         public SsfActionResult BuyOffer(string offid, out string result)
         {
             result = string.Empty;
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}BuyOffer", offid))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}BuyOffer", offid))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    result = responce.Content.ReadAsStringAsync().Result;
+                    return new SsfActionResult() { Error = ERROR.WRONGARGUMENTS, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
+                result = responce.Content.ReadAsStringAsync().Result;
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+        public async  Task<string> BuyOfferAsync(string offid)
+        {
+            var client = InitHttpClient();
+            using (var responce = await PostAsJsonAsync(client, $"{DataUrl}BuyOffer", offid))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return "";
+                }
+                var result = await responce.Content.ReadAsStringAsync();
+                return result;
+            }
+        }
+
+
         public void GetNewOfferActivesCallBack(string oid, Action<List<ActiveType>> action)
         {
             chatconnect.On<List<ActiveType>>("GetNewOfferActives", res =>
@@ -906,26 +1069,37 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetNewOfferActives", oid);
         }
+        public async Task<List<ActiveType>> GetNewOfferActivesAsync(string oid)
+        {
+            var res = JsonConvert.DeserializeObject<List<ActiveType>>(await GetDataAsync($"GetNewOfferActives/{oid}"));
+            return res;
+        }
         public List<ActiveType> GetNewOfferActives(string oid)
         {
             var res = JsonConvert.DeserializeObject<List<ActiveType>>(GetData($"GetNewOfferActives/{oid}"));
             return res;
         }
-        public void OfferContentCallBack(string oid, bool edit, Action<List<Good>> action)
+
+        public void GetOfferContentCallBack(string oid, Action<List<Good>> action)
         {
             chatconnect.On<List<Good>>("OfferContent", res =>
             {
                 chatconnect.Remove("OfferContent");
                 action?.Invoke(res);
             });
-            chatconnect.InvokeAsync("OfferContent", oid, edit);
+            chatconnect.InvokeAsync("OfferContent", oid, true);
         }
-        public List<Good> OfferContent(string oid, bool edit)
+        public async Task<List<Good>> GetOfferContentAsync(string oid)
         {
-            edit = true;
-            var res = JsonConvert.DeserializeObject<List<Good>>(GetData($"OfferContent/{oid}/{edit}"));
+            var res = JsonConvert.DeserializeObject<List<Good>>(await GetDataAsync($"OfferContent/{oid}/{true}"));
             return res;
-        }    
+        }
+        public List<Good> GetOfferContent(string oid)
+        {
+            var res = JsonConvert.DeserializeObject<List<Good>>(GetData($"OfferContent/{oid}/{true}"));
+            return res;
+        }
+
         public void GetAnteriorsCallBack(Action<List<Anterior>> action)
         {
             chatconnect.On<List<Anterior>>("GetAnteriors", res =>
@@ -935,11 +1109,17 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetAnteriors");
         }
+        public async Task<IEnumerable<Anterior>> GetAnteriorsAsync()
+        {
+            var res = JsonConvert.DeserializeObject<List<Anterior>>(await GetDataAsync($"GetAnteriors"));
+            return res;
+        }
         public IEnumerable<Anterior> GetAnteriors()
         {
             var res = JsonConvert.DeserializeObject<List<Anterior>>(GetData($"GetAnteriors"));
             return res;
         }
+
         public void GetTournirPlaceNeigborsCountCallBack(string placeid, Action<int> action)
         {
             chatconnect.On<int>("GetTournirPlaceNeigborsCount", res =>
@@ -949,11 +1129,17 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("GetTournirPlaceNeigborsCount", placeid);
         }
+        public async Task<int> GetTournirPlaceNeigborsCountAsync(string placeid)
+        {
+            var res = JsonConvert.DeserializeObject<int>(await GetDataAsync($"GetTournirPlaceNeigborsCount/{placeid}"));
+            return res;
+        }
         public int GetTournirPlaceNeigborsCount(string placeid)
         {
             var res = JsonConvert.DeserializeObject<int>(GetData($"GetTournirPlaceNeigborsCount/{placeid}"));
             return res;
         }
+
         public void SaveGetFrameFreeParamCallBack(FrameParam inframeParam, Action<FrameParam> action)
         {
             chatconnect.On<FrameParam>("SaveGetFrameFreeParam", res =>
@@ -966,75 +1152,50 @@ namespace GBOClientStd
         public SsfActionResult SaveGetFrameFreeParam(FrameParam inframeParam, out FrameParam outframeParam)
         {
             outframeParam = null;
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}SaveGetFrameFreeParam", inframeParam))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}SaveGetFrameFreeParam", inframeParam))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    var result = responce.Content.ReadAsStringAsync().Result;
-                    outframeParam = JsonConvert.DeserializeObject<FrameParam>(result);
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
                 }
+                var result = responce.Content.ReadAsStringAsync().Result;
+                outframeParam = JsonConvert.DeserializeObject<FrameParam>(result);
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
-        public void AddFreeMatchWebSock(FreeMatch freematch)
+        public async Task<FrameParam> SaveGetFrameFreeParamAsync(FrameParam inframeParam)
         {
+            var client = InitHttpClient();
+            using (var responce = await PostAsJsonAsync(client, $"{DataUrl}SaveGetFrameFreeParam", inframeParam))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+                var result = await responce.Content.ReadAsStringAsync();
+                return JsonConvert.DeserializeObject<FrameParam>(result);
+            }
+        }
+
+        public void AddFreeMatchWebSock(FreeMatch freematch) =>
             chatconnect.InvokeAsync("NewFreeMatch", freematch);
-        }
-        public SsfActionResult AddFreeMatch(FreeMatch freematch)
+        public void AddFreeMatch(FreeMatch freematch)
         {
-            using (var client = InitHttpClient())
-            {
-                using (var responce = PostAsJson(client, $"{DataUrl}NewFreeMatch", freematch))
-                {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    var rspres = responce.Content.ReadAsStringAsync().Result;
-                }
-            }
-            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
-        }     
-        //public void ChangeRatingWebSock(string uid, int value, string comment)
-        //{
-        //    chatconnect.InvokeAsync("ChangeRating", new { uid, value, comment });
-        //}
-        //public SsfActionResult ChangeRating(string uid, int value, string comment)
-        //{
-        //    using (var client = InitHttpClient())
-        //    {
-        //        using (var responce = PostAsJson(client, $"{DataUrl}changerating", new {uid, value, comment }))
-        //        {
-        //            if (!responce.IsSuccessStatusCode)
-        //            {
-        //                return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-        //            }
-        //        }
-        //    }
-        //    return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
-        //}
-        public void  AddOrderToActivityWebSock(Order order)
-        {
-            chatconnect.InvokeAsync("AddOrder", order);
+            var client = InitHttpClient();
+            Task.Run(async () => await PostAsJsonAsync(client, $"{DataUrl}NewFreeMatch", freematch));
         }
-        public SsfActionResult AddOrderToActivity(string Id, int volume, string comment)
+
+        public void AddOrderToActivity(string Id, int volume, string comment, int iscurrency)
         {
-            using (var client = InitHttpClient())
-            {
-                using (var responce = PostAsJson(client, $"{DataUrl}AddOrder", new Order() {Id = Id, Volume = volume, Comment = comment }))
-                {
-                    if (!responce.IsSuccessStatusCode)
-                    {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                }
-            }           
-            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
+            var client = InitHttpClient();
+            Task.Run(async () => await PostAsJsonAsync(client, $"{DataUrl}AddOrder", new Order() { Id = Id, Volume = volume, Comment = comment, IsCurrency = iscurrency }));
         }
+        public void AddOrderToActivityWebSock(string Id, int volume, string comment, int iscurrency)
+        {
+            chatconnect.InvokeAsync("AddOrder", new Order() { Id = Id, Volume = volume, Comment = comment, IsCurrency = iscurrency });
+        }
+
         public void BuyActiveCallBack(string Id, int volume, Action<string> action)
         {
             chatconnect.On<string>("BuyActive", res =>
@@ -1046,26 +1207,45 @@ namespace GBOClientStd
         }
         public SsfActionResult BuyActive(string Id, int volume)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}BuyActive", new Order() { Id = Id, Volume = volume }))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}BuyActive", new Order() { Id = Id, Volume = volume }))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                }
+                else
+                {
+                    var success = responce.Content.ReadAsStringAsync().Result;
+                    if (!string.IsNullOrEmpty(success))
                     {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                        return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = success };
                     }
-                    else
-                    {
-                        var success = responce.Content.ReadAsStringAsync().Result;
-                        if (!string.IsNullOrEmpty(success))
-                        {
-                            return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = success };
-                        }
-                    }  
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+        public async Task<SsfActionResult> BuyActiveAsync(string Id, int volume)
+        {
+            var client = InitHttpClient();
+            using (var responce = await PostAsJsonAsync(client, $"{DataUrl}BuyActive", new Order() { Id = Id, Volume = volume }))
+            {
+                if (!responce.IsSuccessStatusCode)
+                {
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                }
+                else
+                {
+                    var success = await responce.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrEmpty(success))
+                    {
+                        return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = success };
+                    }
+                }
+            }
+            return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
+        }
+
         public void DoExchangeCallBack(ExchangeOrder exchangeOrder, Action<bool> action)
         {
             chatconnect.On<bool>("DoExchange", res =>
@@ -1075,28 +1255,28 @@ namespace GBOClientStd
             });
             chatconnect.InvokeAsync("DoExchange", exchangeOrder);
         }
-        public SsfActionResult DoExchange(ExchangeOrder exchangeOrder)
+        public async Task<SsfActionResult> DoExchangeAsync(ExchangeOrder exchangeOrder)
         {
-            using (var client = InitHttpClient())
+            var client = InitHttpClient();
+            using (var responce = PostAsJson(client, $"{DataUrl}DoExchange", exchangeOrder))
             {
-                using (var responce = PostAsJson(client, $"{DataUrl}DoExchange", exchangeOrder))
+                if (!responce.IsSuccessStatusCode)
                 {
-                    if (!responce.IsSuccessStatusCode)
+                    return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                }
+                else
+                {
+                    var success = await responce.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrEmpty(success))
                     {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
-                    else
-                    {
-                        var success = responce.Content.ReadAsStringAsync().Result;
-                        if (!string.IsNullOrEmpty(success))
-                        {
-                            return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = success };
-                        }
+                        return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = success };
                     }
                 }
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+
+
         #endregion
 
         #region Chat
@@ -1105,10 +1285,13 @@ namespace GBOClientStd
             chatconnect.InvokeAsync("SetMessReaded", messid);
         public void SetMessReaded(string messid)
         {
-            using (var client = InitHttpClient())
-            {
-                var responce = PostAsJson(client, $"{DataUrl}SetMessReaded", messid);
-            }
+            var client = InitHttpClient();
+            var responce = PostAsJson(client, $"{DataUrl}SetMessReaded", messid);
+        }
+        public async Task SetMessReadedAsync(string messid)
+        {
+            var client = InitHttpClient();
+            var responce = await PostAsJsonAsync(client, $"{DataUrl}SetMessReaded", messid);
         }
         public void ChooseCompetitionWebSock(COMPTYPE comptype) =>
             chatconnect.InvokeAsync("EntersToCompType", comptype);
@@ -1149,13 +1332,11 @@ namespace GBOClientStd
         /// <returns></returns>
         public void InvokeNeigborsTheSameCompWebSock(bool needBack, string methodname, FreeMesssage methodparams) =>
                 chatconnect.InvokeAsync("InvokeNeigborsSTCaS", needBack, methodname, methodparams);
-     
         #endregion
-        private  HttpClient InitHttpClient()
+        private HttpClient InitHttpClient()
         {
-            var client = new HttpClient();            
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", user.AccessToken);
-            return client;
+            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", user.AccessToken);
+            return httpClient;
         }
 
         internal class RetryPolicy : IRetryPolicy
@@ -1169,14 +1350,14 @@ namespace GBOClientStd
             }
             public TimeSpan? NextRetryDelay(RetryContext retryContext)
             {
-                System.Diagnostics.Debug.WriteLine($"NextRetryDelay retryContext.PreviousRetryCount {retryContext.PreviousRetryCount} " +
-                    $" retryContext.ElapsedTime {retryContext.ElapsedTime} retryContext.RetryReason.Message {retryContext.RetryReason.Message}");
-                if (retryContext.PreviousRetryCount > Delays.Length -1) return null;
+                //System.Diagnostics.Debug.WriteLine($"NextRetryDelay retryContext.PreviousRetryCount {retryContext.PreviousRetryCount} " +
+                //    $" retryContext.ElapsedTime {retryContext.ElapsedTime} retryContext.RetryReason.Message {retryContext.RetryReason.Message}");
+                if (retryContext.PreviousRetryCount > Delays.Length - 1) return null;
                 Reconnecting?.Invoke((int)retryContext.PreviousRetryCount);
                 return Delays[retryContext.PreviousRetryCount];
             }
         }
     }
 
-   
+
 }

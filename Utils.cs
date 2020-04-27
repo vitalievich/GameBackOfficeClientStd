@@ -168,40 +168,8 @@ namespace GBOClientStd
         public int SubscribedMembers { get; set; } = 0;
         public List<TournRound> Rounds { get; set; }
         public bool IsSeeded { get; set; }
-        //public List<RoundPlace> AllPlaces => (from p in Rounds
-        //                                           let r = p.RoundPlaces
-        //                                           from rp in r
-        //                                           where !rp.Finished 
-        //                                           select rp).ToList();
-        //public List<CompApplicant> AllApplicants => (from p in AllPlaces
-        //                                             let a = p.Applicants
-        //                                             from aa in a
-        //                                             select aa).ToList();
-        //public TournRound CurrentRound => 
-        //    MyPlace == null ? null : (from p in Rounds 
-        //                                                            let r = p.RoundPlaces
-        //                                                            from rp in r
-        //                                                            let a = rp.Applicants
-        //                                                            from aa in a
-        //                                                            where rp.Id == MyPlace.Id && !rp.Finished && aa.Id == UserId
-        //                                                            select p).SingleOrDefault();
-        //public RoundPlace MyPlace =>
-        //    (from ap in AllPlaces let p = ap.Applicants from m in p where m.Id  == UserId && !ap.Finished select ap).SingleOrDefault(); //  && !ap.IsStarted
-        //public bool Loosed(string userconnectid)
-        //{ 
-        //    var subs = Subscribed.Any((a) => a.ConnectId == userconnectid);
-        //    var apl = (from p in Rounds
-        //               let r = p.RoundPlaces
-        //               from rp in r
-        //               let a = rp.Applicants
-        //               from aa in a
-        //               where aa.Id == UserId
-        //               select rp);
-        //    var dfd = apl.Where((z) => !z.Finished).FirstOrDefault();
-        //    var ftf = apl.FirstOrDefault();
-        //    var res = !subs && dfd == null && ftf != null; 
-        //    return res; 
-        //}      
+        public int PlaceFutureCount { get; set; }
+
     }
 
     public class CompApplicant
