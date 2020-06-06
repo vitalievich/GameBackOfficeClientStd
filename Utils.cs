@@ -24,7 +24,6 @@ namespace GBOClientStd
         public string WsAccessToken { get; set; }
         public string RefreshToken { get; set; }
         public int TimeOffset { get; set; }
-
     }
     public class Interlocutor
     {
@@ -45,8 +44,6 @@ namespace GBOClientStd
         int? Value { get; set; }
         IUserGameResource Childrens { get; set; }
     }
-    
-
     public interface ISsfActionResult
     {
         ERROR Error { get; set; }
@@ -81,8 +78,17 @@ namespace GBOClientStd
         public DateTime? CreateDate { get; set; }
         public bool IsNew { get; set; } = false;
         public int Editable { get; set; }
+        public string Hash { get; set; } = string.Empty;
+        public static Offer NewOffer(string uid, string uname) => new Offer()
+        {
+            IsNew = true,
+            OfferId = "N",
+            SellerId = uid,
+            SellerName = uname,
+            OfferNum = "Новый",
+            Editable = 1
+        };
     }
-
     public class Good
     {
         public string GoodId { get; set; }
@@ -108,15 +114,14 @@ namespace GBOClientStd
     {
         public string PlaceId { get; set; }
         public List<GamerPoints> GamerPoints { get; set; }
-        public  List<Order> Rateord {get; set;}
-
+        public List<Order> Rateord { get; set; }
     }
     public class GamerPoints
     {
         public string UserId { get; set; }
         public int Points { get; set; }
     }
-    public class GamerActive 
+    public class GamerActive
     {
         public string ActiveName { get; set; }
         //public string ActiveID { get; set; }
@@ -135,12 +140,11 @@ namespace GBOClientStd
         public string CurrName { get; set; }
         public string GameName { get; set; }
         public decimal Rate { get; set; }
-        public int Volume { get; set; } 
+        public int Volume { get; set; }
         public int MaxVolume { get; set; }
         public decimal Komiss { get; set; }
         public int MinKomiss { get; set; }
-        public int FullKomiss { get; set; }
-
+        public int FullKomiss => (int)Math.Round(Volume * Komiss * 0.01M);
     }
     public class ExchangeOrder
     {
@@ -154,11 +158,10 @@ namespace GBOClientStd
     public class Tournament
     {
         public string Id { get; set; }
-        //public string UserId { get; set; } // ID текущего игрока
         public virtual string Name { get; set; }
         public List<CompApplicant> Subscribed { get; set; }
-        public DateTime EndOfSubscribe { get; set; }  //{ get => _endOfSubscribe.ToLocalTime(); set => _endOfSubscribe=value; }
-        public DateTime Start { get; set; }  //{ get => _start.ToLocalTime(); set => _start = value; }
+        public DateTime EndOfSubscribe { get; set; }  
+        public DateTime Start { get; set; }  //
         public int Ante { get; set; }
         public int Cenz { get; set; }
         public int AuthorGift { get; set; }
@@ -169,9 +172,7 @@ namespace GBOClientStd
         public List<TournRound> Rounds { get; set; }
         public bool IsSeeded { get; set; }
         public int PlaceFutureCount { get; set; }
-
     }
-
     public class CompApplicant
     {
         public string Id { get; set; }
@@ -183,14 +184,14 @@ namespace GBOClientStd
         public string PlaceId { get; set; }
         public string InPlaceId { get; set; }
         public string NextPlaceId { get; set; }
-        public bool IsOnline => !string.IsNullOrEmpty(ConnectId); 
+        public bool IsOnline => !string.IsNullOrEmpty(ConnectId);
         public bool IsSubscribed { get; set; }
         public bool Started { get; set; }
         public string CustomParams { get; set; }
         public string CompId { get; set; }
         public bool FrameEnded { get; set; }
     }
-    public  class CompApplicantComparer : IEqualityComparer<CompApplicant>
+    public class CompApplicantComparer : IEqualityComparer<CompApplicant>
     {
         public bool Equals(CompApplicant x, CompApplicant y)
         {
@@ -221,11 +222,8 @@ namespace GBOClientStd
             }
         }
         public IEnumerable<CompParameter> Parameters { get; set; }
-        //public IEnumerable<CompApplicant> TourApplicants { get; set; }
         public IEnumerable<RoundPlace> RoundPlaces { get; set; }
-
     }
-
     public class Champ
     {
         public string Id { get; set; } // из базы
@@ -238,24 +236,18 @@ namespace GBOClientStd
         public int AuthorGift { get; set; }  // из базы
         public int NumberOfMembers { get; set; }
         public List<CompPlace> Places { get; set; }  // из базы
-        public bool IsUserInComp { get; set; }   
+        public bool IsUserInComp { get; set; }
         public List<CompParameter> Parameters { get; set; }
     }
-
     public class CompPlace
     {
         private DateTime? _started, _ended;
         public string Id { get; set; }
-        public List<CompApplicant> Applicants { get;  set; }
+        public List<CompApplicant> Applicants { get; set; }
         public DateTime? Start { get => _started.HasValue ? (DateTime?)_started.Value.ToLocalTime() : null; set => _started = value; }
         public DateTime? End { get => _ended.HasValue ? (DateTime?)_ended.Value.ToLocalTime() : null; set => _ended = value; }
         public int FrameNum { get; set; }
     }
-    //public class ChampPlace : CompPlace
-    //{
-    //    //public int LPlace { get; set; }
-    //    //public int RPlace { get; set; }
-    //}
     public class RoundPlace : CompPlace
     {
         public string FromPlaceId { get; set; }
@@ -281,14 +273,13 @@ namespace GBOClientStd
         }
         public bool PathToUpExists { get; set; }
     }
-
     public class Anterior
     {
         private DateTime _start, _end;
         public string Id { get; set; } // из базы
         public string Name { get; set; }  // из базы
         public List<AnterApplicant> Applicants { get; set; } // Все Сыгравшие
-        public DateTime End { get => _end.ToLocalTime(); set => _end = value; } 
+        public DateTime End { get => _end.ToLocalTime(); set => _end = value; }
         public DateTime Start { get => _start.ToLocalTime(); set => _start = value; } // из базы
         public int Ante { get; set; } // из базы
         public int Cenz { get; set; } // из базы
@@ -307,7 +298,6 @@ namespace GBOClientStd
         public List<string> CompResult { get; set; }
         public int FrameNum { get; set; }
     }
-
     public class FrameParam
     {
         public string Id { get; set; }
@@ -315,16 +305,13 @@ namespace GBOClientStd
         public string Value { get; set; }
         public int FrameNum { get; set; }
     }
-
-
     public class RoundStart
     {
         private DateTime? _start;
         public string Pid { get; set; }
-        public DateTime? Start { get => _start.HasValue?(DateTime?)_start.Value.ToLocalTime():null; set => _start = value; }
+        public DateTime? Start { get => _start.HasValue ? (DateTime?)_start.Value.ToLocalTime() : null; set => _start = value; }
         public bool SendEmail { get; set; }
     }
-
     public class FrameResult
     {
         public string CompId { set; get; }
@@ -342,7 +329,7 @@ namespace GBOClientStd
         public string CompId { get; set; }
         public string UserId { get; set; }
         public int PlaceNum { get; set; }
-        public int Prize { get; set; } 
+        public int Prize { get; set; }
         public int Rate { get; set; }
         public decimal PrefVolume { get; set; }
     }
@@ -379,7 +366,6 @@ namespace GBOClientStd
         public decimal Active { set; get; }
         public string Comment { get; set; }
     }
-
     public class FreeMatch
     {
         private DateTime? _dateStarted;
@@ -391,41 +377,15 @@ namespace GBOClientStd
         public string JsonParam { get; set; }
         public int Partners { get; set; } = 2;
         public int Frames { get; set; } = 1;
-        public Dictionary<string, CompParameter> ParamsDict => Parameters.ToDictionary(p => p.Id);
         public int FrameNum { get; set; }
-        public DateTime? DateStarted { get => _dateStarted.HasValue? (DateTime ? )_dateStarted.Value.ToLocalTime():null; set => _dateStarted = value; }
-        public List<CompParameter> NewParams { get; set; }
+        public DateTime? DateStarted { get => _dateStarted.HasValue ? (DateTime?)_dateStarted.Value.ToLocalTime() : null; set => _dateStarted = value; }
     }
-    public class NewFreeMatch
-    {
-        public List<NewGameParameter> Parameters { get; set; }
-        public string JsonParam { get; set; }
-        public int Partners { get; set; } = 2;
-        public int Frames { get; set; } = 1;
-    }
-    public class NewGameParameter
-    {
-        public string Id { get; set; }
-        public string CompId { get; set; }
-        public string ParamName { get; set; }
-        public int Value { get; set; }
-    }
-
     public class CompParameter
     {
         public string Id { get; set; }
         public string ParamName { get; set; }
-        //public string CompId { get; set; }
         public int Value { get; set; }
     }
-    //public class CompParameter
-    //{
-    //    public string Id { get; set; }
-    //    public string CompId { get; set; }
-    //    public string ParamName { get; set; }
-    //    public int DefValue { get; set; }
-    //}
-
     public enum ERROR
     {
 
@@ -455,7 +415,7 @@ namespace GBOClientStd
     public static class ErrorMess
     {
         public static Dictionary<ERROR, string> Messages = new Dictionary<ERROR, string>()
-        {
+            {
             { ERROR.NOERROR, "OK"},
             { ERROR.USERNOTEXISTS, "Пользователь не существует"},
             { ERROR.WRONGPASSWORD, "Неправильный пароль"},
@@ -475,11 +435,11 @@ namespace GBOClientStd
             { ERROR.NETERROR, "Server error"},
             { ERROR.DOUBLEENTERPERMITS, "Множественные входы в игру запрещены"},
             { ERROR.GAMELOCKEDBYAUTHOR, "Игра заблокирована автором"},
-       };
+            };
     }
     public class ChatMess
     {
-        public int Dir {  get; set;  }
+        public int Dir { get; set; }
         public string MessageId { get; set; }
         public string senderid { get; set; }
         public DateTime MessageDateTime { get; set; }
@@ -491,13 +451,12 @@ namespace GBOClientStd
         public string FromId { get; set; }
         public string MethodJsonParams { get; set; }
     }
-    //public enum UserInCompState
-    //{
-    //    UNDEFINED = -1,
-    //    CHOOSING,
-    //    INCOMP,
-    //    FINISHED
-    //}
+    public class OfferState
+    {
+        public string State { get; set; }
+        public string OfferId { get; set; }
+        public string Hash { get; set; }
+    }
     public enum COMPTYPE
     {
         CHAMP = 0,
@@ -506,3 +465,4 @@ namespace GBOClientStd
         ANTERIORITY
     }
 }
+
