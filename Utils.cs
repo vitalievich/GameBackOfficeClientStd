@@ -89,6 +89,11 @@ namespace GBOClientStd
             Editable = 1
         };
     }
+    public class OfferGoods
+    {
+        public string OfferId { get; set; }
+        public List<Good> Goods { get; set; }
+    }
     public class Good
     {
         public string GoodId { get; set; }
@@ -102,6 +107,11 @@ namespace GBOClientStd
         public ActiveType ActiveType { get; set; }
         public List<ActiveType> ActiveTypes { get; set; }
         public bool IsNew { get; set; }
+    }
+    public class ChangeOfferResult
+    {
+        public List<Good> Goods { get; set; }
+        public int ChangeState { get; set; }
     }
     public class ActiveType
     {
