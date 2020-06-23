@@ -126,6 +126,11 @@ namespace GBOClientStd
         public List<GamerPoints> GamerPoints { get; set; }
         public List<Order> Rateord { get; set; }
     }
+    public class FreeMatchScore
+    {
+        public string CompId { get; set; }
+        public List<GamerPoints> GamerPoints { get; set; }
+    }
     public class GamerPoints
     {
         public string UserId { get; set; }
