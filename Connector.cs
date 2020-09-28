@@ -18,7 +18,6 @@ using Microsoft.Extensions.Logging;
 
 namespace GBOClientStd
 {
-    //public delegate void PartnerAddFreematch_dlg(FreeMatch fm);
     public delegate void PartnerSubsToFreematch_dlg(CompApplicant mpart);
     public delegate void PartnerUnSubsFromFreematch_dlg(string cid, string compid);
     public delegate void PartnerDelFreematch_dlg(string id);
@@ -70,9 +69,11 @@ namespace GBOClientStd
         private Regex EmailRx = new Regex(@"^(?("")("".+?(?<!\\)""@)|(([0-9a-z]((\.(?!\.))|[-!#\$%&'\*\+/=\?\^`\{\}\|~\w])*)(?<=[0-9a-z])@))" +
             @"(?(\[)(\[(\d{1,3}\.){3}\d{1,3}\])|(([0-9a-z][-\w]*[0-9a-z]*\.)+[a-z0-9][\-a-z0-9]{0,22}[a-z0-9]))$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private TimeSpan DateOffset = new TimeSpan(0);
-        private static TimeSpan[] Delays = new TimeSpan[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(35) };
+        private static TimeSpan[] Delays = new TimeSpan[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(30) };
         public bool EnableCloseEvent = true;
         private static readonly HttpClient httpClient = new HttpClient();
+
+        private static ConcurrentDictionary<int, Action> NestedAction = new ConcurrentDictionary<int, Action>();
 
 
         #region constructors
@@ -86,51 +87,7 @@ namespace GBOClientStd
             refreshTimer = new Timer(Refresh, null, -1, -1);
             datesynctimer = new Timer(SyncDate, null, -1,-1);
             OpenedMethods = new Dictionary<string, Action<FreeMesssage>>();
-            chatconnect = new HubConnectionBuilder()
-            .WithUrl($"{OfficeUrl}/SR",  HttpTransportType.WebSockets, options =>
-            {
-                options.AccessTokenProvider = async () =>
-                {
-                    return await Task.FromResult(user.WsAccessToken);
-                };
-                options.SkipNegotiation = true;
-            })
-            .WithAutomaticReconnect(new RetryPolicy(Reconnect, Delays))
-            .Build();
-            chatconnect.Reconnected += async s =>
-            {
-                await Task.Run(() =>  RestartConnect(true));
-            };
-            chatconnect.Closed += async e =>
-            {
-                if (EnableCloseEvent) ConnectClosed?.Invoke();
-                await Task.CompletedTask;
-            };
-        }
-        public bool IsConnected => chatconnect != null && chatconnect.State == HubConnectionState.Connected;
-        public void RestartConnect(bool force = false)
-        {
-            if (chatconnect == null)
-                throw new InvalidOperationException("Коннектор не инициализирован.");
-            if (!force && chatconnect.State == HubConnectionState.Connected)
-                return;
-            var att = RefreshClient().Error;
-            if  (att != ERROR.NOERROR)
-                Login(user);
-            RebildServerHundlers();
-            chatconnect.StartAsync();
-            chatconnect.InvokeAsync("GameConnect");
-            Reconnected?.Invoke();
-        }
-
-        public void StopConnect()
-        {
-            if (chatconnect == null)
-                throw new InvalidOperationException("Коннектор не инициализирован.");
-            if (chatconnect.State != HubConnectionState.Connected)
-                return;
-            chatconnect.InvokeAsync("GameDisconnect");
-            chatconnect.StopAsync();
+            InitSignalR();
         }
         public static Connector Instance(string gameID, string gboUrl, Action<string> updateAccessToken)
         {
@@ -146,6 +103,63 @@ namespace GBOClientStd
             return Instance(gameID, gboUrl, updateAccessToken);
         }
         public static Connector Instance() => connector;
+        #endregion
+
+        #region connection
+        private void InitSignalR()
+        {
+            chatconnect = new HubConnectionBuilder()
+            .WithUrl($"{OfficeUrl}/SR", HttpTransportType.WebSockets, options =>
+            {
+                options.AccessTokenProvider = async () =>
+                {
+                    return await Task.FromResult(user.WsAccessToken);
+                };
+                options.SkipNegotiation = true;
+            })
+            .WithAutomaticReconnect(new RetryPolicy(Reconnect, Delays))
+            .Build();
+            chatconnect.Reconnected += async s => await Task.Run(() => RestartConnect(true));
+            chatconnect.Closed += async e =>
+            {
+                if (EnableCloseEvent) ConnectClosed?.Invoke();
+                EnableCloseEvent = true;
+                await Task.CompletedTask;
+            };
+        }
+        private void Reconnect(int n) =>
+            Reconnecting?.Invoke(n);
+        public void RestartConnect(bool force = false)
+        {
+            if (chatconnect == null)
+                throw new InvalidOperationException("Коннектор не инициализирован.");
+            if (!force && chatconnect.State == HubConnectionState.Connected)
+                return;
+            var att = RefreshClient();
+            if (att.Error != ERROR.NOERROR)
+                LoginByToken(user);
+            EnableCloseEvent = false;
+            chatconnect.StopAsync();
+            RebildServerHundlers();
+            chatconnect.StartAsync();
+            chatconnect.InvokeAsync("GameConnect");
+            foreach (var key in NestedAction.Keys)
+            {
+                if (NestedAction.TryRemove(key, out var action))
+                    action?.Invoke();
+            }
+            Reconnected?.Invoke();
+        }
+        public void StopConnect()
+        {
+            if (chatconnect == null)
+                throw new InvalidOperationException("Коннектор не инициализирован.");
+            if (chatconnect.State != HubConnectionState.Connected)
+                return;
+            chatconnect.InvokeAsync("GameDisconnect");
+            chatconnect.StopAsync();
+        }
+        public bool IsConnected => chatconnect != null && chatconnect.State == HubConnectionState.Connected;
         private void RebildServerHundlers()
         {
             chatconnect.Remove("UserChangeConnect");
@@ -224,10 +238,10 @@ namespace GBOClientStd
 
             chatconnect.Remove("FreeMethod");
             chatconnect.On<string, FreeMesssage>("FreeMethod", (k, s) =>
-                {
-                    if (OpenedMethods.ContainsKey(k))
-                        OpenedMethods[k]?.Invoke(s);
-                });
+            {
+                if (OpenedMethods.ContainsKey(k))
+                    OpenedMethods[k]?.Invoke(s);
+            });
 
             chatconnect.Remove("OffersChanged");
             chatconnect.On<Offer>("OffersChanged", (o) =>
@@ -263,57 +277,6 @@ namespace GBOClientStd
             chatconnect.On<AnterApplicant>("AnterFrameStarted", (x) =>
                     AnterFrameStarted?.Invoke(x));
         }
-        public static Uri UriToBuyCurrency(int volume) => new Uri($"{OfficeUrl}/{LinkToPay}&val={volume}");
-        private void SyncDate(object obj)
-        {
-            Task.Run(async () =>
-            {
-                var sd = await GetServerDateAsync();
-                var ld = DateTime.Now;
-                DateOffset = ld.Subtract(sd);
-            });
-        }
-        //private void GetServerDateCallBack(Action<DateTime> action)
-        //{
-        //    chatconnect.On<DateTime>("Basedate", r =>
-        //    {
-        //        chatconnect.Remove("Basedate");
-        //        action?.Invoke(r);
-        //    });
-        //    chatconnect.InvokeAsync("Basedate");
-        //}
-        private DateTime GetServerDate()
-        {
-            var rs = GetData($"basedate",false);
-            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
-            return res;
-        }
-        private async Task<DateTime> GetServerDateAsync()
-        {
-            var rs = await GetDataAsync($"basedate",false);
-            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
-            return res;
-        }
-        public DateTime SyncServerDate => DateTime.Now.Subtract(DateOffset);
-        public void AddORChangeAction(string key, Action<FreeMesssage> action)
-        {
-            if (!OpenedMethods.ContainsKey(key)) OpenedMethods.Add(key, action);
-            else OpenedMethods[key] = action;
-        }
-        public void DeleteAction(string key)
-        {
-            if (OpenedMethods.ContainsKey(key)) OpenedMethods.Remove(key);
-        }
-        public string ActionExists(string key)
-        {
-            if (OpenedMethods.ContainsKey(key))
-                return key;
-            return "notExist";
-        }
-        #endregion
-
-     
-        #region connection
         public ISsfActionResult RegisterInGame(string username, string userpassword, string email, string phonenumber)
         {
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(userpassword) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(_gameID))
@@ -459,7 +422,7 @@ namespace GBOClientStd
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", user.RefreshToken);
             using (var response = PostAsJson(client, $"{OfficeUrl}/RefreshToken", null))
             {
-                if (response.StatusCode != HttpStatusCode.OK) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
+                if (response.StatusCode != HttpStatusCode.OK) return new SsfActionResult() { Error = ERROR.NETERROR, Message = $"{ErrorMess.Messages[ERROR.NETERROR]} {response.StatusCode.ToString()}" };
                 result = response.Content.ReadAsStringAsync().Result;
             }
             Dictionary<string, string> tokenDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
@@ -489,12 +452,6 @@ namespace GBOClientStd
             chatconnect.InvokeAsync("GameConnect");
         }
         private void Refresh(object state) => RefreshClient();
-
-        private void Reconnect(int n)
-        {
-            Reconnecting?.Invoke(n);
-        }
-
         public void AbortConnect()
         {
             chatconnect.InvokeAsync("AbortClient");
@@ -523,12 +480,352 @@ namespace GBOClientStd
             }
         }
         #endregion
+        #region ServiceMethods
+        private void CommonCallBack(string method, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBack(string method, object arg1, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBack(string method, object arg1, object arg2, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBack(string method, object arg1, object arg2, object arg3, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2,arg3).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBack(string method, object arg1, object arg2, object arg3, object arg4, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3, arg4).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBack(string method, object arg1, object arg2, object arg3, object arg4,object arg5, Action callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3,arg4,arg5).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                        callback?.Invoke();
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+
+        private void CommonCallBackWithResult(string method, Action<object> callback) 
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            callback?.Invoke(o);
+                        });
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBackWithResult(string method, object arg1, Action<object> callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            callback?.Invoke(o);
+                        });
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBackWithResult(string method, object arg1, object arg2, Action<object> callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            callback?.Invoke(o);
+                        });
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBackWithResult(string method, object arg1, object arg2, object arg3, Action<object> callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            callback?.Invoke(o);
+                        });
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBackWithResult(string method, object arg1, object arg2, object arg3, object arg4, Action<object> callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3, arg4).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            NestedAction.TryRemove((int)index, out _);
+                            callback?.Invoke(o);
+                        });
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonCallBackWithResult(string method, object arg1, object arg2, object arg3, object arg4, object arg5, Action<object> callback)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3, arg4, arg5).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        chatconnect.On<object>(method, o =>
+                        {
+                            chatconnect.Remove(method);
+                            callback?.Invoke(o);
+                        });
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+
+
+        private void CommonWebSockAction(string method)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonWebSockAction(string method, object arg1)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonWebSockAction(string method, object arg1, object arg2)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonWebSockAction(string method, object arg1, object arg2, object arg3)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonWebSockAction(string method, object arg1, object arg2, object arg3, object arg4)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3, arg4).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+        private void CommonWebSockAction(string method, object arg1, object arg2, object arg3, object arg4, object arg5)
+        {
+            var actionIndex = NestedAction.Count;
+            Action action = new Action(() =>
+            {
+                chatconnect.InvokeAsync(method, arg1, arg2, arg3, arg4, arg5).ContinueWith((t, index) =>
+                {
+                    if (t.Status == TaskStatus.RanToCompletion)
+                    {
+                        NestedAction.TryRemove((int)index, out _);
+                    }
+                }, actionIndex);
+            });
+            NestedAction.TryAdd(actionIndex, action);
+            action?.Invoke();
+        }
+
+        public void AddORChangeAction(string key, Action<FreeMesssage> action)
+        {
+            if (!OpenedMethods.ContainsKey(key)) OpenedMethods.Add(key, action);
+            else OpenedMethods[key] = action;
+        }
+        public void DeleteAction(string key)
+        {
+            if (OpenedMethods.ContainsKey(key)) OpenedMethods.Remove(key);
+        }
+        #endregion
+
         #region CommonOperation
         private string GetData(string method, bool needAuth = true)
         {
             string getrequest = $"{DataUrl}{method}";
-            //if (needAuth)
-            //    InitHttpClient();
             var response = httpClient.GetAsync(getrequest).Result;
             if (!response.IsSuccessStatusCode)
             {
@@ -548,58 +845,42 @@ namespace GBOClientStd
             var cnt = await response.Content.ReadAsStringAsync();
             return cnt;
         }
-
-        public void GetCurrencyNameCallBack(Action<string> action)
+        public static Uri UriToBuyCurrency(int volume) => new Uri($"{OfficeUrl}/{LinkToPay}&val={volume}");
+        private void SyncDate(object obj)
         {
-            chatconnect.On<string>("GetCurrencyName", r =>
+            Task.Run(async () =>
             {
-                chatconnect.Remove("GetCurrencyName");
-                action?.Invoke(r);
+                var sd = await GetServerDateAsync();
+                var ld = DateTime.Now;
+                DateOffset = ld.Subtract(sd);
             });
-            chatconnect.InvokeAsync("GetCurrencyName");
-        }
-        public string GetCurrencyName()
-        {
-            return GetData("getcname");
-        }
-        public async Task<string> GetCurrencyNameAsync()
-        {
-            return await GetDataAsync("getcname");
         }
 
-        public void GetGameParamsCallBack(Action<IEnumerable<CompParameter>> action)
+        private void GetServerDateCallBack(Action<DateTime> action) => CommonCallBackWithResult("Basedate", o => action?.Invoke((DateTime)o));
+        private DateTime GetServerDate()
         {
-            chatconnect.On<IEnumerable<CompParameter>>("GetGameParams", r =>
-            {
-                chatconnect.Remove("GetGameParams");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetGameParams");
-        }
-        public IEnumerable<CompParameter> GetGameParams()
-        {
-            var p = GetData($"GetGameParams");
-            var res = JsonConvert.DeserializeObject<IEnumerable<CompParameter>>(p);
+            var rs = GetData($"basedate", false);
+            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
             return res;
         }
-        public async Task<List<CompParameter>> GetGameParamsAsync()
+        private async Task<DateTime> GetServerDateAsync()
         {
-            var p = await GetDataAsync($"GetGameParams");
-            var res = JsonConvert.DeserializeObject<List<CompParameter>>(p);
+            var rs = await GetDataAsync($"basedate", false);
+            DateTime res = JsonConvert.DeserializeObject<DateTime>(rs);
             return res;
         }
+        public DateTime SyncServerDate => DateTime.Now.Subtract(DateOffset);
 
-        public void GetActiveDetailsCallBack(string activeid, DateTime start, DateTime end, Action<IEnumerable<UserInGameActiveMoving>> action)
-        {
-            string datereqstart = start.ToString("yyyyMMdd");
-            string datereqend = end.ToString("yyyyMMdd");
-            chatconnect.On<IEnumerable<UserInGameActiveMoving>>("GetActiveDetails", r =>
-            {
-                chatconnect.Remove("GetActiveDetails");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetActiveDetails", activeid, datereqstart, datereqend);
-        }
+        public void GetCurrencyNameCallBack(Action<string> action) => CommonCallBackWithResult("GetCurrencyName", o => action?.Invoke((string)o));
+        public string GetCurrencyName() => GetData("getcname");
+        public async Task<string> GetCurrencyNameAsync() => await GetDataAsync("getcname");
+
+        public void GetGameParamsCallBack(Action<IEnumerable<CompParameter>> action) => CommonCallBackWithResult("GetGameParams", o => action?.Invoke((IEnumerable<CompParameter>)o));
+        public IEnumerable<CompParameter> GetGameParams() => JsonConvert.DeserializeObject<IEnumerable<CompParameter>>(GetData($"GetGameParams"));
+        public async Task<List<CompParameter>> GetGameParamsAsync() => JsonConvert.DeserializeObject<List<CompParameter>>(await GetDataAsync($"GetGameParams"));
+
+        public void GetActiveDetailsCallBack(string activeid, DateTime start, DateTime end, Action<IEnumerable<UserInGameActiveMoving>> action) =>
+            CommonCallBackWithResult("GetActiveDetails", activeid, start.ToString("yyyyMMdd"), end.ToString("yyyyMMdd"),  o => action?.Invoke((IEnumerable<UserInGameActiveMoving>)o));
         public IEnumerable<UserInGameActiveMoving> GetActiveDetails(string activeid, DateTime start, DateTime end)
         {
             string datereqstart = start.ToString("yyyyMMdd");
@@ -617,26 +898,15 @@ namespace GBOClientStd
             return rss;
         }
 
-        public void GetActivesCallBack(DateTime date, Action<List<GamerActive>> action)
-        {
-            chatconnect.On<List<GamerActive>>("GetActives", la =>
-            {
-                chatconnect.Remove("GetActives");
-                action?.Invoke(la);
-            });
-            chatconnect.InvokeAsync("GetActives", date);
-        }
-   
+        public void GetActivesCallBack(DateTime date, Action<List<GamerActive>> action) => CommonCallBackWithResult("GetGameParams", date, o => action?.Invoke((List<GamerActive>)o));
         public async Task<List<GamerActive>> GetActivesAsync(DateTime date)
         {
-
             using (var responce = await PostAsJsonAsync($"{DataUrl}getactives", date))
             {
                 if (!responce.IsSuccessStatusCode)
                     return new List<GamerActive>();
                 var res = await responce.Content.ReadAsStringAsync();
                 var result = JsonConvert.DeserializeObject<List<GamerActive>>(res);
-
                 return result;
             }
         }
@@ -654,38 +924,16 @@ namespace GBOClientStd
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
-    
-        public void GetParamValueCallBack(string id, Action<int> action)
-        {
-            chatconnect.On<int>("GetParamValue", r =>
-            {
-                chatconnect.Remove("GetParamValue");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetParamValue", id);
-        }
-        public int GetParamValue(string id)
-        {
-            string res = GetData($"GetParamValue/{id}");
-            var rss = JsonConvert.DeserializeObject<int>(res);
-            return rss;
-        }
-        public async Task<int> GetParamValueAsync(string id)
-        {
-            string res = await GetDataAsync($"GetParamValue/{id}");
-            var rss = JsonConvert.DeserializeObject<int>(res);
-            return rss;
-        }
+
+        public void GetParamValueCallBack(string id, Action<int> action) => CommonCallBackWithResult("GetGameParams", id, o => action?.Invoke((int)o));
+        public int GetParamValue(string id) => JsonConvert.DeserializeObject<int>(GetData($"GetParamValue/{id}"));
+        public async Task<int> GetParamValueAsync(string id) => JsonConvert.DeserializeObject<int>(await GetDataAsync($"GetParamValue/{id}"));
         #endregion
 
         #region CommonCompetition
-        public void SubscribeToTournirWebSock(string id) =>
-            chatconnect.InvokeAsync("SubscribeToTournir", id);
-        public void UnSubscribeFromCompetitionWebSock(string id) =>
-            chatconnect.InvokeAsync("UnSubscribeFromCompetition", id);
-
-        public void WriteFrameResultWebSock(FrameResult frameresults) =>
-            chatconnect.InvokeAsync("WriteFrameResult", frameresults);
+        public void SubscribeToTournirWebSock(string id) => CommonWebSockAction("SubscribeToTournir", id);
+        public void UnSubscribeFromCompetitionWebSock(string id) => CommonWebSockAction("UnSubscribeFromCompetition", id);
+        public void WriteFrameResultWebSock(FrameResult frameresults) => CommonWebSockAction("WriteFrameResult", frameresults);
         public SsfActionResult WriteFrameResult(FrameResult frameresults)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}WriteFrameResult", frameresults))
@@ -697,8 +945,7 @@ namespace GBOClientStd
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
-        public void WriteFrameResultsWebSock(List<FrameResult> frameresults) =>
-            chatconnect.InvokeAsync("WriteFrameResults", frameresults);
+        public void WriteFrameResultsWebSock(List<FrameResult> frameresults) => CommonWebSockAction("WriteFrameResult", frameresults);
         public SsfActionResult WriteFrameResults(List<FrameResult> frameresults)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}WriteFrameResults", frameresults))
@@ -710,6 +957,9 @@ namespace GBOClientStd
             }
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
+
+        public void WriteFrameReadMatchResultsCallBack(List<FrameResult> frameresults, Action<List<FrameResult>> action) =>
+            CommonCallBackWithResult("WriteFrameReadMatchResults", frameresults, o => action?.Invoke((List<FrameResult>)o));
         public SsfActionResult WriteFrameReadMatchResults(List<FrameResult> frameresults, out List<FrameResult> matchresults)
         {
             matchresults = new List<FrameResult>();
@@ -737,18 +987,8 @@ namespace GBOClientStd
             }
             return matchresults;
         }
-        public void WriteFrameReadMatchResultsCallBack(List<FrameResult> frameresults, Action<List<FrameResult>> action)
-        {
-            chatconnect.On<List<FrameResult>>("WriteFrameReadMatchResults", r =>
-            {
-                chatconnect.Remove("WriteFrameReadMatchResults");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("WriteFrameReadMatchResults", frameresults);
-        }
 
-        public void WriteMatchWinnerWebSock(MatchResults matchResults) =>
-            chatconnect.InvokeAsync("WriteMatchWinner", matchResults);
+        public void WriteMatchWinnerWebSock(MatchResults matchResults) => CommonWebSockAction("WriteMatchWinner", matchResults);
         public SsfActionResult WriteMatchWinner(string uid, MatchResults matchResults)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}WriteMatchWinner", new { uid, matchResults }))
@@ -763,22 +1003,11 @@ namespace GBOClientStd
 
         #endregion
         #region Tournir
-        public void StartFrameWebSock(string placeid, string custopmparams) =>
-            chatconnect.InvokeAsync("StartFrame", placeid, custopmparams);
-        public void SetTournRoundStartWebSock(RoundStart start) =>
-           chatconnect.InvokeAsync("SetTournRoundStart", start);
-        public void EndOfRoundWebSock(string placeid, string winnerid) =>
-            chatconnect.InvokeAsync("EndOfRound", placeid, winnerid);
+        public void StartFrameWebSock(string placeid, string custopmparams) => CommonWebSockAction("StartFrame", placeid, custopmparams);
+        public void SetTournRoundStartWebSock(RoundStart start) => CommonWebSockAction("SetTournRoundStart", start);
+        public void EndOfRoundWebSock(string placeid, string winnerid) => CommonWebSockAction("EndOfRound", placeid, winnerid);
 
-        public void GetTournamentsCallBack(Action<List<Tournament>> action)
-        {
-            chatconnect.On<List<Tournament>>("Tournaments", r =>
-            {
-                chatconnect.Remove("Tournaments");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("Tournaments");
-        }
+        public void GetTournamentsCallBack(Action<List<Tournament>> action) => CommonCallBackWithResult("Tournaments", o => action?.Invoke((List<Tournament>)o));
         public List<Tournament> GetTournaments()
         {
             var p = GetData($"Tournaments");
@@ -794,24 +1023,13 @@ namespace GBOClientStd
 
         #endregion
         #region FreeMatches
-        public void UnSubscribeFromFreeMatchWebSock(string cid) =>
-            chatconnect.InvokeAsync("UnSubscribeFromFreeMatch", cid);
-        public void SubscribeToFreeMatchWebSock(string cid) =>
-            chatconnect.InvokeAsync("SubscribeToFreeMatch", cid);
-        public void StartFreeMatchWebSock(string compid) =>
-           chatconnect.InvokeAsync("StartFreeMatch", compid);
-        public void DelFreeMatchWebSock(string compid) =>
-            chatconnect.InvokeAsync("DelFreeMatch", compid);
+        public void UnSubscribeFromFreeMatchWebSock(string cid) => CommonWebSockAction("UnSubscribeFromFreeMatch", cid);
+        public void SubscribeToFreeMatchWebSock(string cid) => CommonWebSockAction("SubscribeToFreeMatch", cid);
+        public void StartFreeMatchWebSock(string compid) => CommonWebSockAction("StartFreeMatch", compid);
+        public void DelFreeMatchWebSock(string compid) => CommonWebSockAction("DelFreeMatch", compid);
 
-        public void GetMatchResultsDetailCallBack(string matchid, Action<IEnumerable<FrameResult>> action)
-        {
-            chatconnect.On<IEnumerable<FrameResult>>("GetMatchResultsDetail", r =>
-            {
-                chatconnect.Remove("GetMatchResultsDetail");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetMatchResultsDetail", matchid);
-        }
+        public void GetMatchResultsDetailCallBack(string matchid, Action<IEnumerable<FrameResult>> action) =>
+            CommonCallBackWithResult("GetMatchResultsDetail", matchid, o => action?.Invoke((IEnumerable<FrameResult>)o));
         public IEnumerable<FrameResult> GetMatchResultsDetail(string matchid)
         {
             string res = GetData($"GetMatchResultsDetail/{matchid}");
@@ -825,22 +1043,15 @@ namespace GBOClientStd
             return rss;
         }
 
-        public void GetFreeMatchesCallBack(Action<List<FreeMatch>> action)
-        {
-            chatconnect.On<List<FreeMatch>>("FreeMatches", r =>
-            {
-                chatconnect.Remove("FreeMatches");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("FreeMatches");
-        }
+        public void GetFreeMatchesCallBack(Action<List<FreeMatch>> action) => CommonCallBackWithResult("FreeMatches", o => action?.Invoke((List<FreeMatch>)o));
         public IEnumerable<FreeMatch> GetFreeMatches()
         {
             var p = GetData($"FreeMatches");
             var res = JsonConvert.DeserializeObject<IEnumerable<FreeMatch>>(p);
             return res;
         }
-  
+
+        public void GetFreeMatchCallBack(string compid, Action<FreeMatch> action) => CommonCallBackWithResult("GetFreeMatch", compid, o => action?.Invoke((FreeMatch)o));
         public async Task<FreeMatch> GetFreeMatchAsync(string compid)
         {
             var p = await GetDataAsync($"GetFreeMatch/{compid}");
@@ -878,15 +1089,7 @@ namespace GBOClientStd
         public void SubscribeToChampWebSock(string id) =>
             chatconnect.InvokeAsync("SubscribeToChamp", id);
 
-        public void GetChampsCallBack(Action<List<Champ>> action)
-        {
-            chatconnect.On<List<Champ>>("Champs", r =>
-            {
-                chatconnect.Remove("Champs");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("Champs");
-        }
+        public void GetChampsCallBack(Action<List<Champ>> action) => CommonCallBackWithResult("Champs", o => action?.Invoke((List<Champ>)o));
         public List<Champ> GetChamps()
         {
             var p = GetData($"Champs");
@@ -899,6 +1102,8 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<List<Champ>>(p);
             return res;
         }
+
+        public void GetChampPlacesCallBack(string champid, Action<List<CompPlace>> action) => CommonCallBackWithResult("GetChampPlaces", o => action?.Invoke((List<CompPlace>)o));
         public async Task<List<CompPlace>> GetChampPlacesAsync(string champid)
         {
             var p = await GetDataAsync($"GetChampPlaces/{champid}");
@@ -910,15 +1115,6 @@ namespace GBOClientStd
             var p = GetData($"GetChampPlaces/{champid}");
             var res = JsonConvert.DeserializeObject<List<CompPlace>>(p);
             return res;
-        }
-        public void GetChampPlacesCallBack(string champid, Action<List<CompPlace>> action)
-        {
-            chatconnect.On<List<CompPlace>>("Champs", r =>
-            {
-                chatconnect.Remove("Champs");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetChampPlaces", champid);
         }
 
         public void StartChampPlaceWebSock(string placeid) =>
@@ -978,15 +1174,8 @@ namespace GBOClientStd
             return new SsfActionResult() { Error = ERROR.NOERROR, Message = ErrorMess.Messages[ERROR.NOERROR] };
         }
 
-        public void GetChampResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> action)
-        {
-            chatconnect.On<IEnumerable<FrameResult>>("GetChampResultsDetail", r =>
-            {
-                chatconnect.Remove("GetChampResultsDetail");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetChampResultsDetail", compid);
-        }
+        public void GetChampResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> action) => 
+            CommonCallBackWithResult("GetChampResultsDetail", compid, o => action?.Invoke((IEnumerable<FrameResult>)o));
         public IEnumerable<FrameResult> GetChampResultsDetail(string compid)
         {
             string res = GetData($"GetChampResultsDetail/{compid}");
@@ -1026,15 +1215,8 @@ namespace GBOClientStd
         #endregion
         #region Anterior
 
-        public void GetAnterResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> action)
-        {
-            chatconnect.On<IEnumerable<FrameResult>>("GetAnterResultsDetail", r =>
-            {
-                chatconnect.Remove("GetAnterResultsDetail");
-                action?.Invoke(r);
-            });
-            chatconnect.InvokeAsync("GetAnterResultsDetail", compid);
-        }
+        public void GetAnterResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> callback) =>
+            CommonCallBackWithResult("GetAnterResultsDetail", compid, o => callback?.Invoke((IEnumerable<FrameResult>)o));
         public IEnumerable<FrameResult> GetAnterResultsDetail(string compid)
         {
             string res = GetData($"GetAnterResultsDetail/{compid}");
@@ -1047,15 +1229,9 @@ namespace GBOClientStd
             var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
             return rss;
         }
-        public void StartAnterFrameCallback(string compid, Action<AnterApplicant> callback)
-        {
-            chatconnect.On<AnterApplicant>("AnterFrameStartedCallBack", (x) =>
-            {
-                chatconnect.Remove("AnterFrameStartedCallBack");
-                callback?.Invoke(x);
-            });
-            chatconnect.SendAsync("StartAnterFrame", compid);
-        }
+
+        public void StartAnterFrameCallback(string compid, Action<AnterApplicant> callback) =>
+            CommonCallBackWithResult("StartAnterFrame", compid, o => callback?.Invoke((AnterApplicant)o));
         public async Task<AnterApplicant> StartAnterFrameAsync(string compid)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}StartAnterFrame", compid))
@@ -1082,8 +1258,8 @@ namespace GBOClientStd
                 return anterApplicant;
             }
         }
-        public void WriteAnterPrefsWebSock(List<AnterResult> champresults) =>
-            chatconnect.InvokeAsync("WriteAnterPrefs", champresults);
+
+        public void WriteAnterPrefsWebSock(List<AnterResult> champresults) => CommonWebSockAction("WriteAnterPrefs", champresults);
         public SsfActionResult WriteAnterPrefs(List<AnterResult> champresults)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}WriteAnterPrefs", champresults))
@@ -1169,15 +1345,8 @@ namespace GBOClientStd
         #endregion
         #region DataOperations    
 
-        public void GetChatCallBack(string neghbid, Action<IEnumerable<ChatMess>> action)
-        {
-            chatconnect.On<IEnumerable<ChatMess>>("GetChatHist", res =>
-            {
-                chatconnect.Remove("GetChatHist");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetChatHist", neghbid);
-        }
+        public void GetChatCallBack(string neghbid, Action<IEnumerable<ChatMess>> action) =>
+            CommonCallBackWithResult("GetChatHist", neghbid, o => action?.Invoke((IEnumerable<ChatMess>)o));
         public async Task<IEnumerable<ChatMess>> GetChatAsync(string neghbid)
         {
             var cnt = await GetDataAsync($"GetChatHist/{neghbid}");
@@ -1192,15 +1361,8 @@ namespace GBOClientStd
             return rss;
         }
 
-        public void GetInterlocutorsCallBack(Action<IEnumerable<Interlocutor>> action)
-        {
-            chatconnect.On<IEnumerable<Interlocutor>>("GetInterlocutors", res =>
-            {
-                chatconnect.Remove("GetInterlocutors");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetInterlocutors");
-        }
+        public void GetInterlocutorsCallBack(Action<IEnumerable<Interlocutor>> action) =>
+            CommonCallBackWithResult("GetInterlocutors", o => action?.Invoke((IEnumerable<Interlocutor>)o));
         public async Task<List<Interlocutor>> GetInterlocutorsAsync()
         {
             var p = await GetDataAsync($"GetInterlocutors");
@@ -1212,16 +1374,7 @@ namespace GBOClientStd
             return JsonConvert.DeserializeObject<List<Interlocutor>>(p);
         }
 
-        public void GetAllChatCountCallBack(Action<int> action)
-        {
-            chatconnect.On<int>("GetAllChatCount", res =>
-            {
-                chatconnect.Remove("GetAllChatCount");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetAllChatCount");
-
-        }
+        public void GetAllChatCountCallBack(Action<int> action) =>  CommonCallBackWithResult("GetAllChatCount", o => action?.Invoke((int)o));
         public async Task<int> GetAllChatCountAsync()
         {
             var cnt = await GetDataAsync($"GetAllChatCount");
@@ -1233,15 +1386,7 @@ namespace GBOClientStd
             return int.Parse(cnt);
         }
 
-        public void GetExchangeEntitiesCallBack(Action<List<ExchangeEntity>> action)
-        {
-            chatconnect.On<List<ExchangeEntity>>("GetExchangeEntities", res =>
-            {
-                chatconnect.Remove("GetExchangeEntities");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetExchangeEntities");
-        }
+        public void GetExchangeEntitiesCallBack(Action<List<ExchangeEntity>> action) => CommonCallBackWithResult("GetExchangeEntities", o => action?.Invoke((List<ExchangeEntity>)o));
         public async Task<List<ExchangeEntity>> GetExchangeEntitiesAsync()
         {
             string res = await GetDataAsync($"GetExchangeEntities");
@@ -1255,15 +1400,7 @@ namespace GBOClientStd
             return rss;
         }
 
-        public void GetOffersCallBack(Action<List<Offer>> action)
-        {
-            chatconnect.On<List<Offer>>("GetOffers", res =>
-            {
-                chatconnect.Remove("GetOffers");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetOffers");
-        }
+        public void GetOffersCallBack(Action<List<Offer>> action) => CommonCallBackWithResult("GetOffers", o => action?.Invoke((List<Offer>)o));
         public async Task<List<Offer>> GetOffersAsync()
         {
             var p = await GetDataAsync($"GetOffers");
@@ -1275,15 +1412,7 @@ namespace GBOClientStd
             return JsonConvert.DeserializeObject<List<Offer>>(p);
         }
 
-        public void ChangeOfferCallBack(List<Good> ChangeOffer, Action<List<Good>> action)
-        {
-            chatconnect.On<List<Good>>("ChangeOffer", res =>
-            {
-                chatconnect.Remove("ChangeOffer");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("ChangeOffer", ChangeOffer);
-        }
+        public void ChangeOfferCallBack(List<Good> ChangeOffer, Action<List<Good>> action) => CommonCallBackWithResult("ChangeOffer", ChangeOffer, o => action?.Invoke((List<Good>)o));
         public SsfActionResult ChangeOffer(List<Good> ChangeOffer, out ChangeOfferResult result)
         {
             result = new ChangeOfferResult() { ChangeState = -4 };
@@ -1312,15 +1441,7 @@ namespace GBOClientStd
             }
         }
 
-        public void FindOffersCallBack(List<string> goodids, Action<List<Offer>> action)
-        {
-            chatconnect.On<List<Offer>>("FindOffers", res =>
-            {
-                chatconnect.Remove("FindOffers");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("FindOffers");
-        }
+        public void FindOffersCallBack(List<string> goodids, Action<List<Offer>> action) => CommonCallBackWithResult("FindOffers", goodids, o => action?.Invoke((List<Offer>)o));
         public async Task<List<Offer>> FindOffersAsync(List<string> goodids)
         {
             using (var responce = await PostAsJsonAsync($"{DataUrl}FindOffers", goodids))
@@ -1348,15 +1469,7 @@ namespace GBOClientStd
             }
         }
 
-        public void BuyOfferCallBack(string offid, Action<string> action)
-        {
-            chatconnect.On<string>("BuyOffer", res =>
-            {
-                chatconnect.Remove("BuyOffer");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("BuyOffer", offid);
-        }
+        public void BuyOfferCallBack(string offid, Action<string> action) => CommonCallBackWithResult("BuyOffer", offid, o => action?.Invoke((string)o));
         public SsfActionResult BuyOffer(OfferState offerState, out OfferState result)
         {
             result = new OfferState();
@@ -1385,15 +1498,7 @@ namespace GBOClientStd
             }
         }
 
-        public void GetNewOfferActivesCallBack(string oid, Action<List<ActiveType>> action)
-        {
-            chatconnect.On<List<ActiveType>>("GetNewOfferActives", res =>
-            {
-                chatconnect.Remove("GetNewOfferActives");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetNewOfferActives", oid);
-        }
+        public void GetNewOfferActivesCallBack(string oid, Action<List<ActiveType>> action) => CommonCallBackWithResult("GetNewOfferActives", oid, o => action?.Invoke((List<ActiveType>)o));
         public async Task<List<ActiveType>> GetNewOfferActivesAsync(string oid)
         {
             var p = await GetDataAsync($"GetNewOfferActives/{oid}");
@@ -1407,15 +1512,7 @@ namespace GBOClientStd
             return res;
         }
 
-        public void GetOfferContentCallBack(string oid, Action<List<Good>> action)
-        {
-            chatconnect.On<List<Good>>("OfferContent", res =>
-            {
-                chatconnect.Remove("OfferContent");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("OfferContent", oid, true);
-        }
+        public void GetOfferContentCallBack(string oid, Action<List<Good>> action) => CommonCallBackWithResult("OfferContent", oid, o => action?.Invoke((List<Good>)o));
         public async Task<List<Good>> GetOfferContentAsync(string oid)
         {
             var p = await GetDataAsync($"OfferContent/{oid}/{true}");
@@ -1429,15 +1526,7 @@ namespace GBOClientStd
             return res;
         }
 
-        public void GetAnteriorsCallBack(Action<List<Anterior>> action)
-        {
-            chatconnect.On<List<Anterior>>("GetAnteriors", res =>
-            {
-                chatconnect.Remove("GetAnteriors");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetAnteriors");
-        }
+        public void GetAnteriorsCallBack(Action<List<Anterior>> action) => CommonCallBackWithResult("GetAnteriors", o => action?.Invoke((List<Anterior>)o));
         public async Task<IEnumerable<Anterior>> GetAnteriorsAsync()
         {
             var p = await GetDataAsync($"GetAnteriors");
@@ -1450,21 +1539,18 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<List<Anterior>>(p);
             return res;
         }
+
+        public void GetAnteriorApplicantsCallBack(string compid, Action<List<AnterApplicant>> action) => 
+            CommonCallBackWithResult("GetAnteriorApplicants", compid, o => action?.Invoke((List<AnterApplicant>)o));
         public List<AnterApplicant> GetAnteriorApplicants(string compid)
         {
             var p = GetData($"GetAnteriorApplicants/{compid}");
             var res = JsonConvert.DeserializeObject<List<AnterApplicant>>(p);
             return res;
         }
-        public void GetTournirPlaceNeigborsCountCallBack(string placeid, Action<int> action)
-        {
-            chatconnect.On<int>("GetTournirPlaceNeigborsCount", res =>
-            {
-                chatconnect.Remove("GetTournirPlaceNeigborsCount");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetTournirPlaceNeigborsCount", placeid);
-        }
+
+        public void GetTournirPlaceNeigborsCountCallBack(string placeid, Action<int> action) => 
+            CommonCallBackWithResult("GetTournirPlaceNeigborsCount", placeid, o => action?.Invoke((int)o));
         public async Task<int> GetTournirPlaceNeigborsCountAsync(string placeid)
         {
             var p = await GetDataAsync($"GetTournirPlaceNeigborsCount/{placeid}");
@@ -1479,9 +1565,7 @@ namespace GBOClientStd
         }
 
 
-
-        public void SaveFrameFreeParamWebSock(FrameParam inframeParam) =>
-             chatconnect.SendAsync("SaveFrameFreeParam", inframeParam);
+        public void SaveFrameFreeParamWebSock(FrameParam inframeParam) => CommonWebSockAction("SaveFrameFreeParam", inframeParam);
         public SsfActionResult SaveFrameFreeParam(FrameParam inframeParam)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}SaveFrameFreeParam", inframeParam))
@@ -1510,15 +1594,8 @@ namespace GBOClientStd
             var res = JsonConvert.DeserializeObject<List<FrameParam>>(p);
             return res;
         }
-        public void GetFrameFreeParamCallBack(string placeid, int framenum, Action<List<FrameParam>> action)
-        {
-            chatconnect.On<List<FrameParam>>("GetFrameFreeParam", res =>
-            {
-                chatconnect.Remove("GetFrameFreeParam");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("GetFrameFreeParam", placeid, framenum);
-        }
+        public void GetFrameFreeParamCallBack(string placeid, int framenum, Action<List<FrameParam>> action) =>
+            CommonCallBackWithResult("GetFrameFreeParam", placeid, framenum, o => action?.Invoke((List<FrameParam>)o));
         public void AddFreeMatchWebSock(FreeMatch freematch) =>
             chatconnect.InvokeAsync("NewFreeMatch", freematch);
         public async Task AddFreeMatchAsync(FreeMatch freematch)
@@ -1535,7 +1612,7 @@ namespace GBOClientStd
             PostAsJson($"{DataUrl}AddOrder", new Order() { Id = Id, Volume = volume, Comment = comment, IsCurrency = iscurrency });
         }
         public void AddOrderToActivityWebSock(string Id, int volume, string comment, int iscurrency) =>
-           chatconnect.SendAsync("AddOrder", new Order() { Id = Id, Volume = volume, Comment = comment, IsCurrency = iscurrency });
+            CommonWebSockAction("AddOrder", new Order() { Id = Id, Volume = volume, Comment = comment, IsCurrency = iscurrency });
         public async Task ChangeRatingAsync(ChangeRatingRequest ratingRequest)
         {
             await PostAsJsonAsync($"{DataUrl}ChangeRating", ratingRequest);
@@ -1545,20 +1622,9 @@ namespace GBOClientStd
             PostAsJson($"{DataUrl}ChangeRating", ratingRequest);
         }
 
-        public void ChangeRatingWebSock(ChangeRatingRequest ratingRequest)
-        {
-            chatconnect.SendAsync("ChangeRating", ratingRequest);
-        }
-
-        public void BuyActiveCallBack(string Id, int volume, Action<string> action)
-        {
-            chatconnect.On<string>("BuyActive", res =>
-            {
-                chatconnect.Remove("BuyActive");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("BuyActive", new Order() { Id = Id, Volume = volume });
-        }
+        public void ChangeRatingWebSock(ChangeRatingRequest ratingRequest) =>  CommonWebSockAction("ChangeRating", ratingRequest);
+        public void BuyActiveCallBack(string Id, int volume, Action callback) =>
+            CommonCallBack("BuyActive", new Order() { Id = Id, Volume = volume }, callback);        
         public SsfActionResult BuyActive(string Id, int volume)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}BuyActive", new Order() { Id = Id, Volume = volume }))
@@ -1594,15 +1660,8 @@ namespace GBOClientStd
             }
         }
 
-        public void DoExchangeCallBack(ExchangeOrder exchangeOrder, Action<bool> action)
-        {
-            chatconnect.On<bool>("DoExchange", res =>
-            {
-                chatconnect.Remove("DoExchange");
-                action?.Invoke(res);
-            });
-            chatconnect.InvokeAsync("DoExchange", exchangeOrder);
-        }
+        public void DoExchangeCallBack(ExchangeOrder exchangeOrder, Action<bool> action) =>
+            CommonCallBackWithResult("DoExchange", exchangeOrder, o => action?.Invoke((bool) o));
         public async Task<SsfActionResult> DoExchangeAsync(ExchangeOrder exchangeOrder)
         {
             using (var responce = await PostAsJsonAsync(httpClient, $"{DataUrl}DoExchange", exchangeOrder))
@@ -1641,8 +1700,7 @@ namespace GBOClientStd
 
         #region Chat
 
-        public void SetMessReadedWebSock(string messid) =>
-            chatconnect.InvokeAsync("SetMessReaded", messid);
+        public void SetMessReadedWebSock(string messid) => CommonWebSockAction("SetMessReaded", messid);
         public void SetMessReaded(string messid)
         {
             var responce = PostAsJson(httpClient, $"{DataUrl}SetMessReaded", messid);
@@ -1651,25 +1709,13 @@ namespace GBOClientStd
         {
             var responce = await PostAsJsonAsync($"{DataUrl}SetMessReaded", messid);
         }
-        public void ChooseCompetitionTypeWebSock(COMPTYPE comptype) =>
-            chatconnect.InvokeAsync("EntersToCompType", comptype);
-        public void LeaveCompTypeWebSock(COMPTYPE comptype) =>
-            chatconnect.InvokeAsync("LeaveCompType", comptype);
-        public void ChangeChampPlaceWebSock(string placeid) =>
-            chatconnect.InvokeAsync("ChangeChampPlace", placeid);
-        public void EnterToCompetitionWebSock(string cid)
-        {
-            chatconnect.InvokeAsync("EnterToCompetition", cid);
-        }
-        public void LeaveCompetitionWebSock(string cid)
-        {
-            chatconnect.InvokeAsync("LeaveCompetition", cid);
-        }
-        public void SendMessageWebSock(string recipientId, string text) =>
-                chatconnect.InvokeAsync("TransMessageFC", recipientId, text);
-
-        public void SendMessageToManyWebSock(List<string> recipientIds, string text) =>
-                chatconnect.InvokeAsync("TransMessageFCToMany", recipientIds, text);
+        public void ChooseCompetitionTypeWebSock(COMPTYPE comptype) => CommonWebSockAction("EntersToCompType", comptype);
+        public void LeaveCompTypeWebSock(COMPTYPE comptype) => CommonWebSockAction("LeaveCompType", comptype);
+        public void ChangeChampPlaceWebSock(string placeid) => CommonWebSockAction("ChangeChampPlace", placeid);
+        public void EnterToCompetitionWebSock(string cid) => CommonWebSockAction("EnterToCompetition", cid);
+        public void LeaveCompetitionWebSock(string cid) => CommonWebSockAction("LeaveCompetition", cid);
+        public void SendMessageWebSock(string recipientId, string text) => CommonWebSockAction("TransMessageFC", recipientId, text);
+        public void SendMessageToManyWebSock(List<string> recipientIds, string text) => CommonWebSockAction("TransMessageFCToMany", recipientIds, text);
         /// <summary>
         /// Произвольное сообщение другим клиентам из списка SsfConnectIds и себе (если needBack = true)
         /// </summary>
@@ -1678,7 +1724,7 @@ namespace GBOClientStd
         /// <param name="methodparams"></param>
         /// <returns></returns>
         public void InvokeNeigborMethodWebSock(string[] SsfConnectIds, bool needBack, string methodname, FreeMesssage methodparams) =>
-                chatconnect.InvokeAsync("InvokeNeigborMethod", SsfConnectIds, needBack, methodname, methodparams);
+                CommonWebSockAction("InvokeNeigborMethod", SsfConnectIds, needBack, methodname, methodparams);
         /// <summary>
         /// Произвольное сообщение партнерам по типу соревнования и состояния в нем и себе (если needBack = true)
         /// </summary>
@@ -1687,7 +1733,7 @@ namespace GBOClientStd
         /// <param name="methodparams"></param>
         /// <returns></returns>
         public void InvokeNeigborsTheSameCompTypeAndStateWebSock(bool needBack, string methodname, FreeMesssage methodparams) =>
-                chatconnect.InvokeAsync("InvokeNeigborsSCaS", needBack, methodname, methodparams);
+                CommonWebSockAction("InvokeNeigborsSCaS", needBack, methodname, methodparams);
 
         /// <summary>
         /// Произвольное сообщение партнерам по типу соревнования и себе (если needBack = true)
@@ -1697,7 +1743,7 @@ namespace GBOClientStd
         /// <param name="methodparams"></param>
         /// <returns></returns>
         public void InvokeNeigborsTheSameCompTypeWebSock(bool needBack, string methodname, FreeMesssage methodparams) =>
-                chatconnect.InvokeAsync("InvokeNeigborsSCaS", needBack, methodname, methodparams);
+                CommonWebSockAction("InvokeNeigborsSCaS", needBack, methodname, methodparams);
         /// <summary>
         /// <summary>
         /// Произвольное сообщение партнерам по соревнованию и себе (если needBack = true)
@@ -1707,7 +1753,7 @@ namespace GBOClientStd
         /// <param name="methodparams"></param>
         /// <returns></returns>
         public void InvokeNeigborsTheSameCompWebSock(bool needBack, string methodname, FreeMesssage methodparams) =>
-                chatconnect.InvokeAsync("InvokeNeigborsSTCaS", needBack, methodname, methodparams);
+                CommonWebSockAction("InvokeNeigborsSTCaS", needBack, methodname, methodparams);
         #endregion
         private void InitHttpClient()
         {           
