@@ -1,13 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Windows;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
 
 namespace GBOClientStd
 {
@@ -37,19 +29,7 @@ namespace GBOClientStd
     {
         public string Email { get; set; }
     }
-    public interface IUserGameResource
-    {
-        string Name { get; set; }
-        string Id { get; set; }
-        int? Value { get; set; }
-        IUserGameResource Childrens { get; set; }
-    }
-    public interface ISsfActionResult
-    {
-        ERROR Error { get; set; }
-        string Message { get; set; }
-    }
-    public class SsfActionResult : ISsfActionResult
+    public class SsfActionResult 
     {
         public ERROR Error { get; set; }
         public string Message { get; set; }
@@ -68,7 +48,7 @@ namespace GBOClientStd
         public string UserId { get; set; }
         public int IsCurrency { get; set; }
     }
-    public class Offer
+    public class ExchangeOffer
     {
         public string OfferId { get; set; }
         public string OfferNum { get; set; }
@@ -77,40 +57,25 @@ namespace GBOClientStd
         public decimal FullCost { get; set; }
         public DateTime? CreateDate { get; set; }
         public bool IsNew { get; set; } = false;
-        public int Editable { get; set; }
         public string Hash { get; set; } = string.Empty;
-        public static Offer NewOffer(string uid, string uname) => new Offer()
-        {
-            IsNew = true,
-            OfferId = "N",
-            SellerId = uid,
-            SellerName = uname,
-            OfferNum = "Новый",
-            Editable = 1
-        };
+        public List<ActiveType> ActiveTypes { get; set; }
+        public List<ExchangeOfferGood> Goods { get; set; }
     }
-    public class OfferGoods
-    {
-        public string OfferId { get; set; }
-        public List<Good> Goods { get; set; }
-    }
-    public class Good
+    public class ExchangeOfferGood
     {
         public string GoodId { get; set; }
-        public string OfferId { get; set; }
         public string ActiveId { get; set; }
         public string ActiveName { get; set; }
         public int Volume { get; set; }
         public int MaxVol { get; set; }
         public decimal Cost { get; set; }
-        public decimal FullCost => Volume * Cost;
-        public ActiveType ActiveType { get; set; }
-        public List<ActiveType> ActiveTypes { get; set; }
         public bool IsNew { get; set; }
+        public decimal FullCost => Volume * Cost;
+        public string OfferId { get; set; }
     }
-    public class ChangeOfferResult
+    public class ExchangeUpdateResult
     {
-        public List<Good> Goods { get; set; }
+        public ExchangeOffer Offer { get; set; }
         public int ChangeState { get; set; }
     }
     public class ActiveType
@@ -120,17 +85,19 @@ namespace GBOClientStd
         public int MaxVol { get; set; }
         public override string ToString() => TypeName;
     }
+    public class StringAndInt
+    {
+        public string S { get; set; }
+        public string S1 { get; set; }
+        public int I { get; set; }
+        public int I1 { get; set; }
+    }
     public class ChampPlaceScore
     {
         public string PlaceId { get; set; }
         public List<GamerPoints> GamerPoints { get; set; }
         public List<Order> Rateord { get; set; }
-    }
-    public class FreeMatchScore
-    {
-        public string CompId { get; set; }
-        public List<GamerPoints> GamerPoints { get; set; }
-    }
+    } 
     public class GamerPoints
     {
         public string UserId { get; set; }
@@ -167,6 +134,11 @@ namespace GBOClientStd
         public int MinKomiss { get; set; }
         public int FullKomiss => (int)Math.Round(Volume * Komiss * 0.01M);
     }
+    public class ExchangeResult
+    {
+        public bool Success { get; set; }
+        public List<ExchangeEntity> Entityes { get; set; }
+    }
     public class ExchangeOrder
     {
         public string GameSellId { get; set; }
@@ -181,7 +153,11 @@ namespace GBOClientStd
         public List<string> CompResult { get; set; }
         public int FrameNum { get; set; }
     }
-
+    public class TournirApplicant : CompApplicant
+    {
+        public List<string> CompResult { get; set; }
+        public int FrameNum { get; set; }
+    }
     public class CompApplicant
     {
         public string Id { get; set; }
@@ -191,27 +167,28 @@ namespace GBOClientStd
         public int Rating { get; set; }
         public int Capital { get; set; }
         public string PlaceId { get; set; }
-        public string InPlaceId { get;
-            set; }
+        public string InPlaceId { get; set; }
         public string NextPlaceId { get; set; }
         public bool IsOnline => !string.IsNullOrEmpty(ConnectId);
         public bool IsSubscribed { get; set; }
-        public bool Started { get; set; }
+        public bool Started => InCompState == UserInCompState.INFRAME;
         public string CustomParams { get; set; }
         public string CompId { get; set; }
-        public bool FrameEnded { get; set; }
+        public UserInCompState InCompState { get; set; } = UserInCompState.UNDEFINED;
     }
-    public class CompApplicantComparer : IEqualityComparer<CompApplicant>
+    public enum UserInCompState
     {
-        public bool Equals(CompApplicant x, CompApplicant y)
-        {
-            return x.Id == y.Id;
-        }
-
-        public int GetHashCode(CompApplicant obj)
-        {
-            return obj.Id.GetHashCode();
-        }
+        UNDEFINED = -1,
+        FINISHED,
+        READY,
+        INFRAME,
+        WAITFOREOF,
+        WAITFORSTART
+    }
+    public class CompApplicantDistinctComparer : IEqualityComparer<CompApplicant>
+    {
+        public bool Equals(CompApplicant x, CompApplicant y) => x.Id == y.Id;
+        public int GetHashCode(CompApplicant obj) => obj.Id.GetHashCode();
     }
     public class CompSeededApps
     {
@@ -241,7 +218,13 @@ namespace GBOClientStd
         public DateTime End { get; set; }
         public List<CompParameter> Parameters { get; set; }
     }
-
+    public class GamerAchivment
+    {
+        public string CompName { get; set; }
+        public DateTime Start { get; set; }
+        public string Achivment { get; set; }
+        public int CompType { get; set; }
+    }
     public class Champ : Competition
     {
         public string UserId { get; set; }
@@ -260,12 +243,13 @@ namespace GBOClientStd
         public int SecondUserScore { get; set; }
         public int FrameNum { get; set; }
         public string MatchId { get; set; }
-    }
-  
+        public UserInCompState NewState { get; set; }
+    }  
     public class Tournament : Competition
     {
+        private DateTime endOfsubscribe;
         public List<CompApplicant> Subscribed { get; set; }
-        public DateTime EndOfSubscribe { get; set; }
+        public DateTime EndOfSubscribe { get {return endOfsubscribe.ToLocalTime(); } set { endOfsubscribe = value; } }
         public int RoundsNum => Rounds.Count;
         public int MembersInRound { get; set; }
         override public int NumberOfMembers => (int)Math.Pow(MembersInRound, RoundsNum);
@@ -276,9 +260,10 @@ namespace GBOClientStd
     }
     public class Competition
     {
+        private DateTime start;
         public string Id { get; set; }
         public string Name { get; set; }
-        public DateTime Start { get; set; }  //
+        public DateTime Start { get { return start.ToLocalTime(); } set { start = value; } }  //
         public int Ante { get; set; } // из базы
         public int Cenz { get; set; } // из базы
         public int AuthorGift { get; set; }
@@ -287,14 +272,15 @@ namespace GBOClientStd
     }
     public class FreeMatchState
     {
-        public bool FreeMatchDeleted { get; set; }
-        public List<string> InMatchUsersIds { get; set; }
+        public bool IsFinished { get; set; }
+        public int CurrentFrameNum { get; set; }
     }
     public class FreeMatch
     {
         private DateTime? _dateStarted;
         public string Creator { get; set; }
         public string CreatorID { get; set; }
+        public string WinnerGamerId { get; set; }
         public string CompId { get; set; } = "";
         public List<CompApplicant> Participants { get; set; }
         public List<CompParameter> Parameters { get; set; }
@@ -306,11 +292,12 @@ namespace GBOClientStd
     }
     public class CompPlace
     {
-        private DateTime? _started, _ended;
+        private DateTime? _start, _end;
         public string Id { get; set; }
         public List<CompApplicant> Applicants { get; set; }
-        public DateTime? Start { get => _started.HasValue ? (DateTime?)_started.Value.ToLocalTime() : null; set => _started = value; }
-        public DateTime? End { get => _ended.HasValue ? (DateTime?)_ended.Value.ToLocalTime() : null; set => _ended = value; }
+        public DateTime? Start { get { return _start.HasValue?_start.Value.ToLocalTime(): _start; }
+            set { _start = value; } }
+        public DateTime? End { get { return _end.HasValue ? _end.Value.ToLocalTime() : _end; } set { _end = value; } }
         public int FrameNum { get; set; }
     }
     public class RoundPlace : CompPlace
@@ -318,8 +305,15 @@ namespace GBOClientStd
         public string FromPlaceId { get; set; }
         public bool Finished { get; set; }
         public bool PathToUpExists { get; set; }
+        public List<GamerFrameResult> TournirPlaceResults { get; set; }
     }
-    public class NextRoundPlace //: RoundPlace
+    public class GamerFrameResult
+    {
+        public int FrameNum { get; set; }
+        public string UserId { get; set; }
+        public string Results { get; set; }
+    }
+    public class NextRoundPlace 
     {
         public string FromPlaceId { get; set; }
         public int RoundNum { get; set; }
@@ -345,13 +339,12 @@ namespace GBOClientStd
         public string UserId { get; set; }
         public string Value { get; set; }
         public int FrameNum { get; set; }
-        public int IsCurrent { get; set; }
+        public DateTime DateSetted { get; set; }
     }
     public class RoundStart
     {
-        private DateTime? _start;
         public string Pid { get; set; }
-        public DateTime? Start { get => _start.HasValue ? (DateTime?)_start.Value.ToLocalTime() : null; set => _start = value; }
+        public DateTime? Start { get; set; } 
         public bool SendEmail { get; set; }
     }
     public class FrameResult
@@ -379,13 +372,6 @@ namespace GBOClientStd
     {
         public decimal Score { get; set; }
     }
-    public class ChampGamerResult
-    {
-        public string GamerID { get; set; }
-        public int Points { get; set; }
-        public int LF { get; set; }
-        public int RF { get; set; }
-    }
     public class ChampMeetingScore
     {
         public string FirstUser { get; set; }
@@ -399,14 +385,17 @@ namespace GBOClientStd
     {
         public string MatchId { set; get; }
         public string WinnerId { set; get; }
-        public List<MatchResult> Results { set; get; }
+  
     }
-    public class MatchResult
+    public class FreeMatchScore
     {
-        public string MatchId { set; get; }
-        public decimal Result { set; get; }
-        public decimal Active { set; get; }
-        public string Comment { get; set; }
+        public string CompId { get; set; }
+        public List<GamerPoints> GamerPoints { get; set; }
+    }
+    public class FreeMatchResult
+    {
+        public MatchResults FinalMatchResults { get; set; }
+        public FreeMatchScore MatchScore { get; set; }
     }
     public class CompParameter
     {
@@ -465,7 +454,7 @@ namespace GBOClientStd
             { ERROR.GAMELOCKEDBYAUTHOR, "Игра заблокирована автором"},
             };
     }
-    public class ChatMess
+    public class Chat
     {
         public int Dir { get; set; }
         public string MessageId { get; set; }
