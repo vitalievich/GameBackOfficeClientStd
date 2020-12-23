@@ -103,52 +103,23 @@ namespace GBOClientStd
         #endregion
 
         #region connection
+
         /// <summary>
-        /// Вызов при старте приложения. 
-        /// Если пинг не проходит за 6 раз -- вызывается метод ServerReady параметром false, что означает
-        /// отсутствие связи (сетевые проблемы).
-        /// Если пинг проходит 5 раз -- с сетью все в порядке, проверяется жизнеспособность сервиса (CheckConnect).
-        /// CheckConnect требует авторизации по web socket.
-        /// Если связь восстановилась быстрее чем за ~ 1 мин (серверная настройка) вызывается метод ServerReady параметром true, то есть все ОК,
-        /// и приложение может выполнить логин.
+        /// Проверка доступности сервера
         /// </summary>
         /// <param name="serverurl"></param>
-        /// <param name="ServerReady"></param>
-        public async  static void CheckServerReady(string serverurl, Action<bool> ServerReady)
+        /// <returns>bool</returns>
+        public async  static void IsServerReady(string serverurl, Action<bool> ServerReady)
         {
-            int errorPingAttempt = 0, successPingAttempt = 0, _maxPingAttempt = 6, _enoughPingAttempt = 2;
-            while (true)
-            {
-                var pingReply = new Ping().Send(serverurl.Substring(serverurl.IndexOf("//") +2 ));
-                if (pingReply.Status != IPStatus.Success)
-                {
-                    errorPingAttempt += 1;
-                    successPingAttempt = 0;
-                    if (errorPingAttempt >= _maxPingAttempt)
-                    {
-                        errorPingAttempt = 0;
-                        ServerReady?.Invoke(false);
-                        break;
-                    }
-                }
-                else
-                {
-                    successPingAttempt += 1;
-                    errorPingAttempt = 0;
-                    if (successPingAttempt >= _enoughPingAttempt)
-                    {
-                        successPingAttempt = 0;
-                        var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result;
-                        if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.Unauthorized)
-                        {
-                            ServerReady?.Invoke(false);
-                            break;
-                        }
-                        ServerReady?.Invoke(true);
-                        break;
-                    }
-                }
-            }
+            //    try
+            //    {
+            var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result; //  {Timeout = TimeSpan.FromSeconds(5) }
+                ServerReady?.Invoke(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized);
+            //}
+            //catch (Exception ex)
+            //{
+            //    ServerReady?.Invoke(false);
+            //}
             await Task.CompletedTask;
         }
         private void InitSignalR()
