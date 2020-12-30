@@ -212,26 +212,12 @@ namespace GBOClientStd
         public IEnumerable<RoundPlace> RoundPlaces { get; set; }
         public override string ToString() => RoundName;
     }
-    public class Anterior : Competition
-    {
-        public List<AnterApplicant> Applicants { get; set; } 
-        public DateTime End { get; set; }
-        public List<CompParameter> Parameters { get; set; }
-    }
     public class GamerAchivment
     {
         public string CompName { get; set; }
         public DateTime Start { get; set; }
         public string Achivment { get; set; }
         public int CompType { get; set; }
-    }
-    public class Champ : Competition
-    {
-        public string UserId { get; set; }
-        public DateTime End { get; set; }
-        public List<CompPlace> Places { get; set; }  // из базы
-        public bool IsUserInComp { get; set; }
-        public List<CompParameter> Parameters { get; set; }
     }
     public class ChampFrameResult
     {
@@ -244,7 +230,13 @@ namespace GBOClientStd
         public int FrameNum { get; set; }
         public string MatchId { get; set; }
         public UserInCompState NewState { get; set; }
-    }  
+    }
+    public class Champ : Competition
+    {
+        public DateTime End { get; set; }
+        public List<CompPlace> Places { get; set; }  // из базы
+        public List<CompParameter> Parameters { get; set; }
+    }
     public class Tournament : Competition
     {
         private DateTime endOfsubscribe;
@@ -253,7 +245,6 @@ namespace GBOClientStd
         public int RoundsNum => Rounds.Count;
         public int MembersInRound { get; set; }
         override public int NumberOfMembers => (int)Math.Pow(MembersInRound, RoundsNum);
-        public int SubscribedMembers { get; set; } = 0;
         public List<TournRound> Rounds { get; set; }
         public bool IsSeeded { get; set; }
         public int PlaceFutureCount { get; set; }
@@ -268,7 +259,12 @@ namespace GBOClientStd
         public int Cenz { get; set; } // из базы
         public int AuthorGift { get; set; }
         public virtual int NumberOfMembers { get; set; }
-
+    }
+    public class Anterior : Competition
+    {
+        public List<AnterApplicant> Applicants { get; set; }
+        public DateTime End { get; set; }
+        public List<CompParameter> Parameters { get; set; }
     }
     public class FreeMatchState
     {

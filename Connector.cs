@@ -41,6 +41,7 @@ namespace GBOClientStd
         public Action<CompApplicant> TournRoundLeaved;
         public Action<NextRoundPlace> RoundEnded;
         public Action<CompSeededApps> CompSeeded;
+        //public Action<AnterApplicant> AnterFrameStarted;
         public Action<MatchResults> FreeMatchEnded;
         public Action<RoundStart> TournRoundStartSetted;
         public Action<ExchangeOffer> OffersChanged;
@@ -109,17 +110,10 @@ namespace GBOClientStd
         /// </summary>
         /// <param name="serverurl"></param>
         /// <returns>bool</returns>
-        public async  static void IsServerReady(string serverurl, Action<bool> ServerReady)
+        public async static void IsServerReady(string serverurl, Action<bool> ServerReady)
         {
-            //    try
-            //    {
-            var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result; //  {Timeout = TimeSpan.FromSeconds(5) }
+            var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result; 
                 ServerReady?.Invoke(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized);
-            //}
-            //catch (Exception ex)
-            //{
-            //    ServerReady?.Invoke(false);
-            //}
             await Task.CompletedTask;
         }
         private void InitSignalR()
@@ -131,7 +125,6 @@ namespace GBOClientStd
                 options.SkipNegotiation = true;
             })
             .Build();
-            chatconnect.Reconnected += async s => await RestartConnect();
             chatconnect.Closed += async e =>
             {
                 await Task.CompletedTask;
@@ -188,16 +181,12 @@ namespace GBOClientStd
             if (chatconnect == null)
                 throw new InvalidOperationException("Коннектор не инициализирован.");
             if (chatconnect.State == HubConnectionState.Connected)
-            return;
+                return;
             try
             {
                 var response = httpClient.GetAsync($"{OfficeUrl}/Api/Data/CheckConnect").Result;
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    var att = RefreshClient();
-                    if (att.Error != ERROR.NOERROR)
-                        LoginByToken(user);
-                }
+                    LoginByToken(user);
             }
             catch
             {
@@ -237,6 +226,12 @@ namespace GBOClientStd
             chatconnect.On<CompSeededApps>("CompSeeded", (tsa) =>
             {
                 CompSeeded?.Invoke(tsa);
+            });
+
+            chatconnect.Remove("StartAnterFrame");
+            chatconnect.On<AnterApplicant>("StartAnterFrame", (aa) =>
+            {
+                AnterFrameStarted?.Invoke(aa);
             });
 
             chatconnect.Remove("FreeMatchEnded");
@@ -348,8 +343,6 @@ namespace GBOClientStd
                 PartnerDelFreematch?.Invoke(i);
             });
             chatconnect.Remove("AnterFrameStarted");
-            chatconnect.On<AnterApplicant>("AnterFrameStarted", (x) =>
-                    AnterFrameStarted?.Invoke(x));
         }
         public SsfActionResult RegisterInGame(string username, string userpassword, string email, string phonenumber)
         {
@@ -389,16 +382,12 @@ namespace GBOClientStd
                     if (response.StatusCode != HttpStatusCode.OK)
                     {
                         return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    }
+                    }                    
                     result = response.Content.ReadAsStringAsync().Result;
                 }
             }
-
             Dictionary<string, string> tokenDictionary = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
-
-            if (!tokenDictionary.ContainsKey("connectid") || string.IsNullOrEmpty(tokenDictionary["connectid"]))
-                throw new Exception("Error connectid");
-
+            
             ERROR err = (ERROR)int.Parse(tokenDictionary["Error"]);
             int RefreshTimeOutMsec = 86400000;
 
@@ -1178,8 +1167,8 @@ namespace GBOClientStd
             return rss;
         }
 
-        public void StartAnterFrameCallback(string compid, Action<AnterApplicant> callback) =>
-            CommonCallBackWithResult<AnterApplicant>("StartAnterFrame", compid, o => callback?.Invoke(o));
+        public void StartAnterFrameWebSock(string compid) =>
+            CommonWebSockAction("StartAnterFrame", compid);
         public async Task<AnterApplicant> StartAnterFrameAsync(string compid)
         {
             using (var responce = PostAsJson(httpClient, $"{DataUrl}StartAnterFrame", compid))
