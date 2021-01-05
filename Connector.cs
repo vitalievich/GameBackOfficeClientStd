@@ -730,7 +730,7 @@ namespace GBOClientStd
             var cnt = await response.Content.ReadAsStringAsync();
             return cnt;
         }
-        public static Uri UriToBuyCurrency(int volume) => new Uri($"{OfficeUrl}/{LinkToPay}&val={volume}");
+        public static string UriToBuyCurrency(int volume) => $"{OfficeUrl}/{LinkToPay}&val={volume}";
         private async void SyncDate(object obj)
         {
             var sd = await GetServerDateAsync();
@@ -1154,10 +1154,10 @@ namespace GBOClientStd
 
         public void GetAnterResultsDetailCallBack(string compid, Action<IEnumerable<FrameResult>> callback) =>
             CommonCallBackWithResult<IEnumerable<FrameResult>>("GetAnterResultsDetail", compid, o => callback?.Invoke(o));
-        public IEnumerable<FrameResult> GetAnterResultsDetail(string compid)
+        public List<FrameResult> GetAnterResultsDetail(string compid)
         {
             string res = GetData($"GetAnterResultsDetail/{compid}");
-            var rss = JsonConvert.DeserializeObject<IEnumerable<FrameResult>>(res);
+            var rss = JsonConvert.DeserializeObject<List<FrameResult>>(res);
             return rss;
         }
         public async Task<IEnumerable<FrameResult>> GetAnterResultsDetailAsync(string compid)
@@ -1227,7 +1227,6 @@ namespace GBOClientStd
         }
         private HttpResponseMessage PostAsJson(string url, object obj)
         {
-            //InitHttpClient();
             try
             {
                 if (obj == null)
@@ -1242,7 +1241,6 @@ namespace GBOClientStd
         }
         private async Task<HttpResponseMessage> PostAsJsonAsync(string url, object obj)
         {
-            //InitHttpClient();
             try
             {
                 if (obj == null)
