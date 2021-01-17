@@ -112,8 +112,15 @@ namespace GBOClientStd
         /// <returns>bool</returns>
         public async static void IsServerReady(string serverurl, Action<bool> ServerReady)
         {
-            var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result; 
+            try
+            {
+                var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result;
                 ServerReady?.Invoke(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized);
+            }
+            catch (Exception ex)
+            {
+                ServerReady?.Invoke(false);
+            }
             await Task.CompletedTask;
         }
         private void InitSignalR()
@@ -358,14 +365,21 @@ namespace GBOClientStd
             SsfActionResult actionResult;
             using (var client = new HttpClient())
             {
-                using (var response = PostAsJson(client, $"{OfficeUrl}/register", usrReg))
+                try
                 {
-                    if (response.StatusCode == HttpStatusCode.NotFound) return new SsfActionResult() { Error = ERROR.NETERROR, Message = ErrorMess.Messages[ERROR.NETERROR] };
-                    cnt = response.Content.ReadAsStringAsync().Result;
-                    if (!response.IsSuccessStatusCode)
+                    using (var response = PostAsJson(client, $"{OfficeUrl}/register", usrReg))
                     {
-                        return new SsfActionResult() { Error = ERROR.NETERROR, Message = cnt };
+                        if (response.StatusCode != HttpStatusCode.OK) return new SsfActionResult() { Error = ERROR.NETERROR, Message = response.ReasonPhrase };
+                        cnt = response.Content.ReadAsStringAsync().Result;
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            return new SsfActionResult() { Error = ERROR.NETERROR, Message = response.ReasonPhrase };
+                        }
                     }
+                }
+                catch (Exception ex)
+                {
+                    return new SsfActionResult() { Error = ERROR.COMMONERROR, Message = ex.Message };
                 }
             }
             actionResult = GetInnerError(cnt);
@@ -1220,9 +1234,9 @@ namespace GBOClientStd
                 var body = JsonConvert.SerializeObject(obj);
                 return client.PostAsync(url, new StringContent(body, Encoding.UTF8, "application/json")).Result;
             }
-            catch
+            catch (HttpRequestException httpex)
             {
-                return new HttpResponseMessage(HttpStatusCode.BadRequest);
+                return new HttpResponseMessage(HttpStatusCode.BadRequest) { ReasonPhrase= httpex.Message };
             }
         }
         private HttpResponseMessage PostAsJson(string url, object obj)

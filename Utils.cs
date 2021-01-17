@@ -362,7 +362,6 @@ namespace GBOClientStd
         public int PlaceNum { get; set; }
         public int Prize { get; set; }
         public int Rate { get; set; }
-        public decimal PrefVolume { get; set; }
     }
     public class AnterResult : ChampPref
     {
@@ -420,6 +419,8 @@ namespace GBOClientStd
         DOUBLEENTERPERMITS,
         GAMELOCKEDBYAUTHOR,
         GAMEADMINLOCKED,
+        ADMINMONEYSNOTENOUGH,
+        WRONGUSERNAME,
         NETERROR,
         WRONGARGUMENTS,
         PASSWORDINVALID,
@@ -428,7 +429,7 @@ namespace GBOClientStd
     public static class ErrorMess
     {
         public static Dictionary<ERROR, string> Messages = new Dictionary<ERROR, string>()
-            {
+        {
             { ERROR.NOERROR, "OK"},
             { ERROR.USERNOTEXISTS, "Пользователь не существует"},
             { ERROR.WRONGPASSWORD, "Неправильный пароль"},
@@ -448,7 +449,8 @@ namespace GBOClientStd
             { ERROR.NETERROR, "Server error"},
             { ERROR.DOUBLEENTERPERMITS, "Множественные входы в игру запрещены"},
             { ERROR.GAMELOCKEDBYAUTHOR, "Игра заблокирована автором"},
-            };
+            { ERROR.WRONGUSERNAME, "Ошибка в имени. Допустимы только цифры, латиница и кириллица"}
+        };
     }
     public class Chat
     {
