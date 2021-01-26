@@ -117,7 +117,7 @@ namespace GBOClientStd
                 var response = new HttpClient().GetAsync($"{serverurl}/Api/Data/CheckConnect").Result;
                 ServerReady?.Invoke(response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized);
             }
-            catch (Exception ex)
+            catch
             {
                 ServerReady?.Invoke(false);
             }
@@ -431,14 +431,11 @@ namespace GBOClientStd
         }
 
         /// <summary>
-        /// Стратегия авторизации и аутентификации:
-        /// При первом входе по имени + е-майлу + паролю + ИД игры GBOClientStd.connector получает access_token и refresh_token 
+        /// При первом входе по имени + е-майлу + паролю + ИД игры GBOClientStd.connector получает access_token, WsAccessToken и refresh_token 
         /// со сроком валидности 1 минута, в течении ее выполняет RefreshClient(),
-        /// где получает новые access_token и  refresh_token со сроком валидности 1440 мин (1 сутки).
-        /// 
+        /// где получает новые access_token и refresh_token со сроком валидности 1440 мин (1 сутки).
         /// </summary>
-        /// <param name="username"></param>
-        /// <param name="userpassword"></param>
+        /// <param name="userLogin"></param>
         /// <returns></returns>
         public SsfActionResult Login(UserLogin userLogin)
         {
@@ -466,10 +463,9 @@ namespace GBOClientStd
                 if (!tokenDictionary.ContainsKey("connectid") || string.IsNullOrEmpty(tokenDictionary["connectid"]))
                     throw new Exception("Error connectid");
 
-                int RefreshTimeOutMsec = 86400000;
                 if (err == ERROR.NOERROR)
                 {
-                    RefreshTimeOutMsec = int.Parse(tokenDictionary["refreshtimeout"]);
+                    var RefreshTimeOutMsec = int.Parse(tokenDictionary["refreshtimeout"]);
                     user.RefreshToken = tokenDictionary["refresh_token"];
                     user.AccessToken = tokenDictionary["access_token"];
                     user.WsAccessToken = tokenDictionary["wsacess_token"];
